@@ -1,0 +1,674 @@
+#!/usr/bin/env python3
+
+# A professional serial/TCP communication GUI application.
+# The code is structured using an object-oriented approach to ensure
+# each tab's functionality and widgets are encapsulated and independent.
+
+import tkinter as tk
+from tkinter import ttk, font
+import serial
+import threading
+import time
+from serial.tools import list_ports
+import winsound
+import json
+import os
+import socket
+import subprocess
+import threading
+import platform
+
+# --- Global Constants ---
+# A list of standard baud rates
+BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 256000, 500000]
+
+# List of predefined commands for the dropdown
+PRESET_COMMANDS = ["", "/lcd ", "/ping ", "/lan ", "/ttl ", "/rs-422 ", "/usb ", "/conf ", "/reset"]
+
+# List of End-of-Line options
+EOL_OPTIONS = ["\\r\\n", "\\n", "\\r", "None"]
+
+# Configuration key-value pairs for the /conf command
+CONFIG_OPTIONS = {
+    "ttl": "1",
+    "rs-422": "1",
+    "usb": "1",
+    "lan": "1",
+    "alcd": "1",
+    "server-ip": "192.168.1.200",
+    "server-port": "8585",
+    "rs-422-baudrate": "115200",
+    "rs-422-frame": "8n1",
+    "ttl-baudrate": "115200",
+    "ttl-frame": "8n1",
+    "alcd-rows": "2",
+    "alcd-columns": "16"
+}
+
+# --- Helper Functions (can be used by multiple classes) ---
+
+def create_circle(canvas, x, y, r, color):
+    """Draws a circle on a canvas."""
+    x0 = x - r
+    y0 = y - r
+    x1 = x + r
+    y1 = y + r
+    return canvas.create_oval(x0, y0, x1, y1, fill=color, outline=color)
+
+def update_status_lights(light_canvases, status):
+    """Updates the status lights based on the connection status."""
+    disconnected_canvas, connecting_canvas, connected_canvas = light_canvases
+    
+    colors = {
+        "disconnected": ("red", "gray", "gray"),
+        "connecting": ("gray", "yellow", "gray"),
+        "connected": ("gray", "gray", "#32CD32")
+    }
+    
+    disconnected_canvas.itemconfig(1, fill=colors[status][0])
+    connecting_canvas.itemconfig(1, fill=colors[status][1])
+    connected_canvas.itemconfig(1, fill=colors[status][2])
+
+class ConfigurationManager:
+    """A class to manage saving and loading application settings."""
+    def __init__(self, filename="config.json"):
+        self.filename = filename
+        self.config = {}
+        self.load_config()
+
+    def load_config(self):
+        """Loads configuration from a JSON file."""
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, 'r') as f:
+                    self.config = json.load(f)
+            except (IOError, json.JSONDecodeError) as e:
+                print(f"Error loading config file: {e}")
+                self.config = {}
+        else:
+            self.config = {}
+
+    def save_config(self, port, baud_rate):
+        """Saves the current port and baud rate to the config file."""
+        self.config['port'] = port
+        self.config['baud_rate'] = baud_rate
+        try:
+            with open(self.filename, 'w') as f:
+                json.dump(self.config, f, indent=4)
+        except IOError as e:
+            print(f"Error saving config file: {e}")
+
+class SerialManager:
+    """Manages all serial communication and its corresponding GUI elements."""
+    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+        self.tab_frame = tab_frame
+        self.status_text = status_text_widget
+        self.eol_widgets = eol_widgets
+        self.ser = None
+        self.config_manager = ConfigurationManager()
+        self.create_serial_widgets()
+        
+    def create_serial_widgets(self):
+        """Creates all GUI widgets for the Serial tab."""
+        # Serial input frame
+        input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+
+        default_font = font.nametofont("TkDefaultFont")
+        default_font.config(size=10) # Change 16 to your desired font size
+
+        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
+        self.ports_combobox = ttk.Combobox(input_frame, values=self.scan_ports(), state="readonly", width=11, font=default_font)
+        self.ports_combobox.grid(row=0, column=1, padx=2, pady=5)
+        
+        ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
+        self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="readonly", width=6, font=default_font)
+        self.baud_combobox.grid(row=0, column=3, padx=5, pady=5)
+        self.baud_combobox.set(115200)
+
+        self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
+        self.connect_button.grid(row=0, column=4, padx=5, pady=5)
+        
+        refresh_button = ttk.Button(input_frame, text="Refresh", command=self.update_port_list)
+        refresh_button.grid(row=0, column=5, padx=5, pady=5)
+        
+        # Status lights frame
+        self.serial_lights_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        self.serial_lights_frame.pack(side=tk.RIGHT, padx=1, pady=5, anchor="n")
+        
+        self.disconnected_canvas = tk.Canvas(self.serial_lights_frame, width=30, height=30)
+        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        create_circle(self.disconnected_canvas, 15, 15, 12, "red")
+        
+        self.connecting_canvas = tk.Canvas(self.serial_lights_frame, width=30, height=30)
+        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        create_circle(self.connecting_canvas, 15, 15, 12, "gray")
+        
+        self.connected_canvas = tk.Canvas(self.serial_lights_frame, width=30, height=30)
+        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        create_circle(self.connected_canvas, 15, 15, 12, "gray")
+        
+        self.update_ui(connected=False)
+        self.load_last_config()
+
+    def load_last_config(self):
+        """Loads the last used port and baud rate from the config file."""
+        if self.config_manager.config:
+            last_port = self.config_manager.config.get('port')
+            last_baud = self.config_manager.config.get('baud_rate')
+
+            available_ports = self.scan_ports()
+            if last_port in available_ports:
+                self.ports_combobox.set(last_port)
+            
+            if last_baud in BAUD_RATES:
+                self.baud_combobox.set(last_baud)
+
+    def scan_ports(self):
+        """Scans and returns a list of available serial ports."""
+        ports = list_ports.comports()
+        return [port.device for port in ports]
+
+    def update_port_list(self):
+        """Updates the list of available ports in the combobox."""
+        new_ports = self.scan_ports()
+        self.ports_combobox['values'] = new_ports
+        current_port = self.ports_combobox.get()
+        if current_port not in new_ports:
+            self.ports_combobox.set("Select a port")
+        self.status_text.insert(tk.END, "Ports list updated.\n")
+        self.status_text.see(tk.END)
+
+    def toggle_connection_threaded(self):
+        """Starts the connection/disconnection process in a separate thread."""
+        if not (self.ser and self.ser.is_open):
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connecting")
+            self.status_text.insert(tk.END, "Connecting...\n")
+        conn_thread = threading.Thread(target=self._toggle_connection_logic, daemon=True)
+        conn_thread.start()
+
+    def _toggle_connection_logic(self):
+        """Handles the actual connection/disconnection logic in a separate thread."""
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+            self.tab_frame.after(0, lambda: self.update_ui(connected=False))
+        else:
+            try:
+                port_name = self.ports_combobox.get()
+                baud_rate = int(self.baud_combobox.get())
+                if not port_name or "Select" in port_name:
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error: No valid port selected.\n", 'error'))
+                    self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
+                    return
+                self.ser = serial.Serial(port_name, baud_rate, timeout=1)
+                self.config_manager.save_config(port_name, baud_rate)
+
+                read_thread = threading.Thread(target=self.read_from_port, daemon=True)
+                read_thread.start()
+                self.tab_frame.after(0, lambda: self.update_ui(connected=True, port_name=port_name, baud_rate=baud_rate))
+            except ValueError:
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error: Invalid baud rate. Please select a number.\n", 'error'))
+                self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
+            except serial.SerialException as e:
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Error: Could not open the port {port_name}. {e}\n", 'error'))
+                self.tab_frame.after(0, lambda: self.update_ui(connected=False))
+
+    def update_ui(self, connected, port_name=None, baud_rate=None, unexpected_disconnect=False):
+        """Updates the UI elements after a connection attempt."""
+        if connected:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connected")
+            self.status_text.delete(1.0, tk.END)
+            self.status_text.insert(tk.END, f"Successfully connected to {port_name} at {baud_rate} baud.\n", 'connected')
+            self.connect_button.config(text="Disconnect")
+            self.ports_combobox.config(state="disabled")
+            self.baud_combobox.config(state="disabled")
+        else:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected")
+            if self.ser:
+                self.ser = None
+            self.status_text.insert(tk.END, "Disconnected from port.\n", 'disconnected')
+            if unexpected_disconnect:
+                self.status_text.insert(tk.END, "Connection lost unexpectedly. The port list has been refreshed.\n", 'error')
+                self.update_port_list()
+            self.connect_button.config(text="Connect")
+            self.ports_combobox.config(state="readonly")
+            self.baud_combobox.config(state="readonly")
+        self.status_text.see(tk.END)
+
+    def read_from_port(self):
+        """Reads data from the serial port in a separate thread."""
+        while self.ser and self.ser.is_open:
+            try:
+                line = self.ser.readline().decode('utf-8').strip()
+                if line:
+                    winsound.Beep(615, 95) # Plays a sound when a message is received.
+                    line_cleaned = line.replace('\x1a', '')
+                    self.status_text.insert(tk.END, f"Received : {line_cleaned}\n\n", 'received')
+                    self.status_text.see(tk.END)
+            except serial.SerialException:
+                if self.ser and self.ser.is_open:
+                    self.ser.close()
+                self.tab_frame.after(0, lambda: self.update_ui(connected=False, unexpected_disconnect=True))
+                break
+
+    def send_data(self, base_message):
+        """Sends data through the serial port."""
+        eol_option = self.eol_widgets[0].get()
+        display_eol_var = self.eol_widgets[1]
+        
+        if self.ser and self.ser.is_open:
+            if eol_option == "\\r\\n":
+                final_message = base_message + '\r\n'
+            elif eol_option == "\\n":
+                final_message = base_message + '\n'
+            elif eol_option == "\\r":
+                final_message = base_message + '\r'
+            else:
+                final_message = base_message
+            
+            self.ser.write(final_message.encode('utf-8'))
+            if display_eol_var.get():
+                display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
+            else:
+                display_message = base_message
+            self.status_text.insert(tk.END, f"Sent : {display_message}\n", 'sent')
+            self.status_text.see(tk.END)
+            
+            if base_message.strip() == "/reset":
+                self.status_text.insert(tk.END, "Reset command sent. Disconnecting from port.\n Please reconnect after the device has rebooted.\n", 'warning')
+                self.status_text.see(tk.END)
+                self.ser.close()
+                self.update_ui(connected=False)
+        else:
+            self.status_text.insert(tk.END, "Error: Not connected to a serial port.\n", 'error')
+            self.status_text.see(tk.END)
+
+class TcpManager:
+    """Manages all TCP communication and its corresponding GUI elements."""
+    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+        self.tab_frame = tab_frame
+        self.status_text = status_text_widget
+        self.eol_widgets = eol_widgets
+        self.sock = None
+        self.read_thread = None
+        self.is_connected = False
+        self.create_tcp_widgets()
+
+    def create_tcp_widgets(self):
+        """Creates all GUI widgets for the TCP tab."""
+        # TCP input frame
+        input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+        
+        default_font = font.nametofont("TkDefaultFont")
+        default_font.config(size=10) # Change 16 to your desired font size
+
+        ttk.Label(input_frame, text="IP Address :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
+        self.ip_entry = ttk.Entry(input_frame, width=15, font=default_font)
+        self.ip_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.ip_entry.insert(0, "192.168.1.200")
+        
+        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
+        self.port_entry = ttk.Entry(input_frame, width=8, font=default_font)
+        self.port_entry.grid(row=0, column=3, padx=5, pady=5)
+        self.port_entry.insert(0, "8585")
+        
+        self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
+        self.connect_button.grid(row=0, column=4, padx=5, pady=5)
+        
+        # Status lights frame
+        self.tcp_lights_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        self.tcp_lights_frame.pack(side=tk.RIGHT, padx=5, pady=5, anchor="n")
+        
+        self.disconnected_canvas = tk.Canvas(self.tcp_lights_frame, width=30, height=30)
+        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        create_circle(self.disconnected_canvas, 15, 15, 12, "red")
+        
+        self.connecting_canvas = tk.Canvas(self.tcp_lights_frame, width=30, height=30)
+        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        create_circle(self.connecting_canvas, 15, 15, 12, "gray")
+        
+        self.connected_canvas = tk.Canvas(self.tcp_lights_frame, width=30, height=30)
+        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        create_circle(self.connected_canvas, 15, 15, 12, "gray")
+        
+        self.update_ui(connected=False)
+
+
+    def toggle_connection_threaded(self):
+        """Starts the TCP connection/disconnection process in a separate thread."""
+        if not self.is_connected:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connecting")
+            self.status_text.insert(tk.END, "Connecting...\n")
+        conn_thread = threading.Thread(target=self._toggle_connection_logic, daemon=True)
+        conn_thread.start()
+
+    def _toggle_connection_logic(self):
+        """Handles the actual TCP connection/disconnection logic."""
+        if self.is_connected:
+            self.disconnect()
+            self.tab_frame.after(0, lambda: self.update_ui(connected=False))
+        else:
+            host = self.ip_entry.get()
+            port = self.port_entry.get()
+            is_connected = self.connect(host, port)
+            self.tab_frame.after(0, lambda: self.update_ui(connected=is_connected))
+
+    def connect(self, host, port):
+        """Attempts to establish a TCP connection."""
+        if not host or not port:
+            self.status_text.insert(tk.END, "Error: IP address and port are required.\n", 'error')
+            self.status_text.see(tk.END)
+            return False
+        
+        try:
+            self.port = int(port)
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(5)
+            self.sock.connect((host, self.port))
+            self.sock.settimeout(None)
+            self.is_connected = True
+            self.status_text.insert(tk.END, f"Successfully connected to TCP server at {host} : {self.port}\n", 'connected')
+            self.status_text.see(tk.END)
+            self.read_thread = threading.Thread(target=self.read_from_socket, daemon=True)
+            self.read_thread.start()
+            return True
+        except (socket.error, ValueError) as e:
+            self.status_text.insert(tk.END, f"Error: Could not connect to TCP server. {e}\n", 'error')
+            self.status_text.see(tk.END)
+            self.is_connected = False
+            return False
+
+    def disconnect(self):
+        """Closes the TCP connection safely."""
+        if self.sock:
+            self.sock.close()
+        self.is_connected = False
+
+        if self.status_text and str(self.status_text) in self.status_text.tk.call("winfo", "children", self.status_text.master):
+            self.status_text.insert(tk.END, "Disconnected from TCP server.\n", 'disconnected')
+            self.status_text.see(tk.END)     
+
+    def read_from_socket(self):
+        """Reads data from the TCP socket in a separate thread."""
+        while self.is_connected:
+            try:
+                data = self.sock.recv(1024)
+                if not data:
+                    self.disconnect()
+                    break
+                decoded_data = data.decode('utf-8')
+                self.status_text.insert(tk.END, f"Received TCP: {decoded_data}\n", 'received')
+                self.status_text.see(tk.END)
+                winsound.Beep(915, 95) # Plays a sound when a message is received.
+            except socket.error as e:
+                if self.is_connected:
+                    self.status_text.insert(tk.END, f"TCP connection error: {e}\n", 'error')
+                    self.status_text.see(tk.END)
+                self.disconnect()
+                break
+
+    def send_data(self, base_message):
+        """Sends data through the TCP socket."""
+        eol_option = self.eol_widgets[0].get()
+        display_eol_var = self.eol_widgets[1]
+        
+        if self.is_connected:
+            if eol_option == "\\r\\n":
+                final_message = base_message + '\r\n'
+            elif eol_option == "\\n":
+                final_message = base_message + '\n'
+            elif eol_option == "\\r":
+                final_message = base_message + '\r'
+            else:
+                final_message = base_message
+            
+            try:
+                self.sock.sendall(final_message.encode('utf-8'))
+                if display_eol_var.get():
+                    display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
+                else:
+                    display_message = base_message
+                self.status_text.insert(tk.END, f"Sent TCP: {display_message}\n", 'sent')
+            except socket.error as e:
+                self.status_text.insert(tk.END, f"Error sending data: {e}\n", 'error')
+        else:
+            self.status_text.insert(tk.END, "Error: TCP client is not connected.\n", 'error')
+        self.status_text.see(tk.END)
+        
+    def update_ui(self, connected):
+        """Updates the UI elements after a connection attempt for the given protocol."""
+        if connected:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connected")
+            self.connect_button.config(text="Disconnect")
+            self.ip_entry.config(state="disabled")
+            self.port_entry.config(state="disabled")
+        else:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected")
+            self.connect_button.config(text="Connect")
+            self.ip_entry.config(state="normal")
+            self.port_entry.config(state="normal")
+        self.status_text.see(tk.END)
+
+class App:
+    """The main application class that sets up the GUI and manages tabs."""
+    def __init__(self, window):
+        self.window = window
+        self.window.title("Tahamtan Serial/TCP Comm | Dev by Afshin Moradzadeh")
+        self.window.geometry("575x675")
+        self.window.configure(bg="#F0F0F0")
+        # window.resizable(False, False)
+
+        self.style = ttk.Style()
+        self.style.configure("TCombobox", font="TkDefaultFont 12")
+        self.style.configure("TButton", font="TkDefaultFont 12")
+        self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 12))
+      
+        self.setup_gui()
+        
+    def setup_gui(self):
+        """Sets up the main GUI components including the notebook and tabs."""
+        main_frame = tk.Frame(self.window, bg="#F0F0F0")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        
+        self.tab_control = ttk.Notebook(main_frame)
+        self.tab_control.pack(fill=tk.BOTH, expand=True)
+        
+        # --- Create tabs and their content ---
+        serial_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(serial_tab, text="Serial")
+
+        tcp_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(tcp_tab, text="TCP Client")
+        
+        # Create a single Text widget with a scrollbar for each tab
+        # This will be passed to the respective Manager class
+        # Serial Status/Output Text Box
+        serial_text_with_scroll_frame = tk.Frame(serial_tab, bg="#F0F0F0")
+        serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
+        serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
+        serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.serial_status_text = tk.Text(serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=serial_scrollbar.set, padx=5)
+        self.serial_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        serial_scrollbar.config(command=self.serial_status_text.yview)
+
+        # TCP Status/Output Text Box
+        tcp_text_with_scroll_frame = tk.Frame(tcp_tab, bg="#F0F0F0")
+        tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
+        tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
+        tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tcp_status_text = tk.Text(tcp_text_with_scroll_frame, height=18, width=60, font="TkDefaultFont 12", yscrollcommand=tcp_scrollbar.set)
+        self.tcp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tcp_scrollbar.config(command=self.tcp_status_text.yview)
+
+        # Configure the 'sent', 'received' etc. tags
+        self.serial_status_text.tag_configure('sent', foreground='blue')
+        self.serial_status_text.tag_configure('received', foreground='green')
+        self.serial_status_text.tag_configure('error', foreground='red')
+        self.serial_status_text.tag_configure('warning', foreground='orange')
+
+        self.tcp_status_text.tag_configure('sent', foreground='blue')
+        self.tcp_status_text.tag_configure('received', foreground='green')
+        self.tcp_status_text.tag_configure('error', foreground='red')
+        self.tcp_status_text.tag_configure('warning', foreground='orange')
+
+        # --- Create the shared Send Frame at the bottom ---
+        send_frame = tk.Frame(main_frame, bg="#F0F0F0")
+        send_frame.pack(fill=tk.X, pady=10)
+        send_frame.columnconfigure(1, weight=1)
+
+        # 1. Preset combobox
+        self.preset_combobox = ttk.Combobox(send_frame, values=PRESET_COMMANDS, width=7, font="TkDefaultFont 12")
+        self.preset_combobox.grid(row=0, column=0, padx=5, pady=5)
+        self.preset_combobox.set("")
+        self.preset_combobox.bind("<<ComboboxSelected>>", self.handle_preset_selection)
+
+        # 2. Custom message entry
+        self.message_entry = ttk.Entry(send_frame, width=36, font="TkDefaultFont 12")
+        self.message_entry.grid(row=0, column=1, padx=1, pady=1, sticky="nsew")
+
+        # 3. EOL combobox
+        eol_label = ttk.Label(send_frame, text="EOL :", font="TkDefaultFont 12")
+        eol_label.grid(row=0, column=2, padx=1, pady=5)
+        self.eol_combobox = ttk.Combobox(send_frame, values=EOL_OPTIONS, state="readonly", width=5, font="TkDefaultFont 12")
+        self.eol_combobox.grid(row=0, column=3, padx=1, pady=5)
+        
+        # Bind the <<NotebookTabChanged>> event to a handler function
+        self.tab_control.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+        
+        # Initially set the correct value for the active tab (Serial)
+
+        # 4. Checkbutton for EOL display with text
+        self.display_eol_var = tk.BooleanVar(value=True)
+        self.display_eol_checkbutton = ttk.Checkbutton(send_frame, text="Show \\r\\n", variable=self.display_eol_var)
+        self.display_eol_checkbutton.grid(row=1, column=3, columnspan=2, padx=5, pady=5)
+
+        # 5. Send button
+        send_button = ttk.Button(send_frame, text="Send", command=self.send_data)
+        send_button.grid(row=1, column=1, columnspan=1, pady=5, sticky="ew")
+
+        # 6. Dynamic config widgets (initially hidden)
+        self.conf_key_combobox = None
+        self.conf_value_entry = None
+        
+        # --- Instantiate the managers after the Text widgets are created ---
+        self.serial_manager = SerialManager(serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var))
+        self.tcp_manager = TcpManager(tcp_tab, self.tcp_status_text, (self.eol_combobox, self.display_eol_var))
+        
+        # Bind the Ctrl+L keyboard shortcut to the clear function
+        self.window.bind('<Control-l>', self.clear_status_box)
+        self.window.bind('<Control-L>', self.clear_status_box)
+        
+        print("The config file is being saved to this path:")
+        print(os.getcwd())
+
+    def on_tab_changed(self, event):
+        """
+        Handles the tab change event to set the correct EOL value.
+        """
+        # Get the index of the currently selected tab
+        current_tab_index = self.tab_control.index(self.tab_control.select())
+        
+        # Check if the active tab is the Serial tab (index 0)
+        if current_tab_index == 0:
+            # Set the EOL to \r\n for the Serial tab
+            self.eol_combobox.set("\\r\\n")
+        
+        # If the active tab is the TCP tab (index 1)
+        elif current_tab_index == 1:
+            # Clear the EOL combobox for the TCP tab
+            self.eol_combobox.set("")
+
+    def clear_status_box(self, event):
+        """Clears all content from the status_box widget of the current tab."""
+        current_tab = self.tab_control.tab(self.tab_control.select(), "text")
+        if current_tab == "Serial":
+            text_widget = self.serial_status_text
+        elif current_tab == "TCP Client":
+            text_widget = self.tcp_status_text
+        else:
+            return
+            
+        text_widget.config(state=tk.NORMAL)
+        text_widget.delete('1.0', 'end')
+        text_widget.config(state=tk.DISABLED)
+
+    def send_data(self):
+        """Sends data from the input widgets based on the current active tab."""
+        current_tab_text = self.tab_control.tab(self.tab_control.select(), "text")
+        
+        # Determine which text widget to use based on the current tab
+        if current_tab_text == "Serial":
+            text_widget = self.serial_status_text
+            manager = self.serial_manager
+        elif current_tab_text == "TCP Client":
+            text_widget = self.tcp_status_text
+            manager = self.tcp_manager
+        else:
+            return
+
+        preset_command = self.preset_combobox.get()
+        base_message = ""
+
+        if preset_command == "/conf ":
+            selected_key = self.conf_key_combobox.get()
+            custom_value = self.conf_value_entry.get()
+            if not selected_key:
+                text_widget.insert(tk.END, "Error: Please select a configuration key.\n", 'error')
+                text_widget.see(tk.END)
+                return
+            base_message = f"{preset_command}{selected_key} {custom_value}"
+        else:
+            custom_message = self.message_entry.get()
+            base_message = f"{preset_command}{custom_message}"
+        
+        if not base_message.strip():
+            text_widget.insert(tk.END, "Error: Please enter or select a command to send.\n", 'error')
+            text_widget.see(tk.END)
+            return
+            
+        manager.send_data(base_message)
+
+    def handle_preset_selection(self, event):
+        """Dynamically changes the message entry widget based on the selected command."""
+        selected_command = self.preset_combobox.get()
+        
+        self.message_entry.grid_forget()
+        if self.conf_key_combobox:
+            self.conf_key_combobox.grid_forget()
+        if self.conf_value_entry:
+            self.conf_value_entry.grid_forget()
+        
+        if selected_command == "/conf ":
+            self.conf_key_combobox = ttk.Combobox(self.message_entry.master, values=list(CONFIG_OPTIONS.keys()), state="readonly", width=20, font="TkDefaultFont 12")
+            self.conf_key_combobox.grid(row=0, column=1, padx=2, pady=5, sticky="ew")
+            self.conf_key_combobox.bind("<<ComboboxSelected>>", self.update_conf_value)
+            
+            self.conf_value_entry = ttk.Entry(self.message_entry.master, width=25, font="TkDefaultFont 12")
+            self.conf_value_entry.grid(row=0, column=2, padx=2, pady=5, sticky="ew")
+        elif selected_command == "/reset":
+            self.message_entry.grid(row=0, column=1, padx=5, pady=5)
+            self.message_entry.config(state="disabled")
+        else:
+            self.message_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+            self.message_entry.config(state="normal")
+
+    def update_conf_value(self, event):
+        """Updates the value entry with the default value for the selected key."""
+        selected_key = self.conf_key_combobox.get()
+        selected_key_clean = selected_key.strip()
+        if selected_key_clean in CONFIG_OPTIONS:
+            self.conf_value_entry.delete(0, tk.END)
+            self.conf_value_entry.insert(0, CONFIG_OPTIONS[selected_key_clean])
+
+if __name__ == "__main__":
+    window = tk.Tk()
+    app = App(window)
+    window.mainloop()
+    
+    # This part will run after the window is closed
+    if app.serial_manager.ser and app.serial_manager.ser.is_open:
+        app.serial_manager.ser.close()
+    if app.tcp_manager.is_connected:
+        app.tcp_manager.disconnect()

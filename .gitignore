@@ -1,0 +1,18 @@
+# Build artifacts
+build/
+dist/
+*.exe
+*.zip
+*.pkg
+*.toc
+*.txt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VSCode settings (optional)
+.vscode/
+
+# Logs
+*.log

@@ -489,7 +489,7 @@ class App:
         serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
         serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.serial_status_text = tk.Text(serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=serial_scrollbar.set, padx=5)
+        self.serial_status_text = tk.Text(serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD)
         self.serial_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         serial_scrollbar.config(command=self.serial_status_text.yview)
 
@@ -498,7 +498,7 @@ class App:
         tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
         tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tcp_status_text = tk.Text(tcp_text_with_scroll_frame, height=18, width=60, font="TkDefaultFont 12", yscrollcommand=tcp_scrollbar.set)
+        self.tcp_status_text = tk.Text(tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=tcp_scrollbar.set, wrap=tk.WORD)
         self.tcp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tcp_scrollbar.config(command=self.tcp_status_text.yview)
 
@@ -540,7 +540,7 @@ class App:
         # Initially set the correct value for the active tab (Serial)
 
         # 4. Checkbutton for EOL display with text
-        self.display_eol_var = tk.BooleanVar(value=True)
+        self.display_eol_var = tk.BooleanVar(value=False)
         self.display_eol_checkbutton = ttk.Checkbutton(send_frame, text="Show \\r\\n", variable=self.display_eol_var)
         self.display_eol_checkbutton.grid(row=1, column=3, columnspan=2, padx=5, pady=5)
 
@@ -648,8 +648,10 @@ class App:
             self.conf_value_entry = ttk.Entry(self.message_entry.master, width=25, font="TkDefaultFont 12")
             self.conf_value_entry.grid(row=0, column=2, padx=2, pady=5, sticky="ew")
         elif selected_command == "/reset":
+            self.message_entry.delete(0, tk.END)
             self.message_entry.grid(row=0, column=1, padx=5, pady=5)
             self.message_entry.config(state="disabled")
+            
         else:
             self.message_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
             self.message_entry.config(state="normal")

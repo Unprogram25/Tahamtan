@@ -15,8 +15,8 @@ import json
 import os
 import socket
 import subprocess
-import threading
 import platform
+from ping3 import ping
 
 # --- Global Constants ---
 # A list of standard baud rates
@@ -130,22 +130,22 @@ class SerialManager:
         self.connect_button.grid(row=0, column=4, padx=5, pady=5)
         
         refresh_button = ttk.Button(input_frame, text="Refresh", command=self.update_port_list)
-        refresh_button.grid(row=0, column=5, padx=5, pady=5)
+        refresh_button.grid(row=1, column=1, padx=5, pady=5)
         
         # Status lights frame
-        self.serial_lights_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
-        self.serial_lights_frame.pack(side=tk.RIGHT, padx=1, pady=5, anchor="n")
+        lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
+        lights_frame.grid(row=1, column=5, padx=5, pady=5, sticky=tk.W)
         
-        self.disconnected_canvas = tk.Canvas(self.serial_lights_frame, width=30, height=30)
-        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        self.disconnected_canvas = tk.Canvas(lights_frame, width=30, height=30)
+        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=1)
         create_circle(self.disconnected_canvas, 15, 15, 12, "red")
         
-        self.connecting_canvas = tk.Canvas(self.serial_lights_frame, width=30, height=30)
-        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        self.connecting_canvas = tk.Canvas(lights_frame, width=30, height=30)
+        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=1)
         create_circle(self.connecting_canvas, 15, 15, 12, "gray")
         
-        self.connected_canvas = tk.Canvas(self.serial_lights_frame, width=30, height=30)
-        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        self.connected_canvas = tk.Canvas(lights_frame, width=30, height=30)
+        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=1)
         create_circle(self.connected_canvas, 15, 15, 12, "gray")
         
         self.update_ui(connected=False)
@@ -200,7 +200,7 @@ class SerialManager:
                     self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error: No valid port selected.\n", 'error'))
                     self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
                     return
-                self.ser = serial.Serial(port_name, baud_rate, timeout=1)
+                self.ser = serial.Serial(port_name, baud_rate, timeout=0.01)
                 self.config_manager.save_config(port_name, baud_rate)
 
                 read_thread = threading.Thread(target=self.read_from_port, daemon=True)
@@ -316,23 +316,81 @@ class TcpManager:
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
         self.connect_button.grid(row=0, column=4, padx=5, pady=5)
         
-        # Status lights frame
-        self.tcp_lights_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
-        self.tcp_lights_frame.pack(side=tk.RIGHT, padx=5, pady=5, anchor="n")
+        # Add a ping button and a status label in the next row
+        self.ping_button = ttk.Button(input_frame, text="Ping", command=self.send_ping)
+        self.ping_button.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+
+        self.ping_status_label = ttk.Label(input_frame, text="RTT: N/A", font=default_font)
+        self.ping_status_label.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+
+         # Ping result label to show the RTT value
+        self.ping_result_label = ttk.Label(input_frame, text="RTT: N/A", font=default_font)
+        self.ping_result_label.grid(row=1, column=2, padx=5, pady=5, sticky=tk.W)
+
+        # Status lights frame 
+        lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
+        lights_frame.grid(row=1, column=4, padx=5, pady=5, sticky=tk.W)
         
-        self.disconnected_canvas = tk.Canvas(self.tcp_lights_frame, width=30, height=30)
-        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        self.disconnected_canvas = tk.Canvas(lights_frame, width=30, height=30)
+        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=1)
         create_circle(self.disconnected_canvas, 15, 15, 12, "red")
         
-        self.connecting_canvas = tk.Canvas(self.tcp_lights_frame, width=30, height=30)
-        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        self.connecting_canvas = tk.Canvas(lights_frame, width=30, height=30)
+        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=1)
         create_circle(self.connecting_canvas, 15, 15, 12, "gray")
         
-        self.connected_canvas = tk.Canvas(self.tcp_lights_frame, width=30, height=30)
-        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=1) # Use tk.LEFT
+        self.connected_canvas = tk.Canvas(lights_frame, width=30, height=30)
+        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=1)
         create_circle(self.connected_canvas, 15, 15, 12, "gray")
         
         self.update_ui(connected=False)
+
+
+    def send_ping(self):
+        """
+        Initiates an ICMP ping operation on a separate thread to avoid freezing the GUI.
+        """
+        self.ping_button.config(state=tk.DISABLED)
+        ping_thread = threading.Thread(target=self._run_ping_logic)
+        ping_thread.daemon = True
+        ping_thread.start()
+
+    def _run_ping_logic(self):
+        """
+        Executes ICMP ping logic in a separate thread.
+        """
+        try:
+            target_ip = self.ip_entry.get().strip()
+            if not target_ip:
+                self.tab_frame.after(0, lambda: self._update_ping_gui("Status: No IP Provided", "RTT: N/A"))
+                return
+
+            self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Pinging...", "RTT: N/A"))
+            start_time = time.time()
+            rtt = ping(target_ip, timeout=2, unit="ms")
+            end_time = time.time()
+
+            if rtt is None:
+                self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Timeout", "RTT: N/A"))
+            else:
+                # Optional: compare with measured RTT for validation
+                measured_rtt = (end_time - start_time) * 1000
+                self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Success", f"RTT: {rtt:.2f} ms"))
+
+        except PermissionError:
+            self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Admin Required", "RTT: N/A"))
+        except Exception as e:
+            self.tab_frame.after(0, lambda: self._update_ping_gui(f"Status: Error - {e}", "RTT: N/A"))
+        finally:
+            self.tab_frame.after(0, lambda: self.ping_button.config(state=tk.NORMAL))
+
+    def _update_ping_gui(self, status_text, rtt_text):
+        """
+        Safely updates GUI elements from a different thread.
+        """
+        self.ping_status_label.config(text=status_text)
+        self.ping_result_label.config(text=rtt_text)
+
 
 
     def toggle_connection_threaded(self):
@@ -364,7 +422,7 @@ class TcpManager:
         try:
             self.port = int(port)
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.settimeout(5)
+            self.sock.settimeout(3)
             self.sock.connect((host, self.port))
             self.sock.settimeout(None)
             self.is_connected = True
@@ -489,7 +547,7 @@ class App:
         serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
         serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.serial_status_text = tk.Text(serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD)
+        self.serial_status_text = tk.Text(serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False)
         self.serial_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         serial_scrollbar.config(command=self.serial_status_text.yview)
 
@@ -498,7 +556,7 @@ class App:
         tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
         tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tcp_status_text = tk.Text(tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=tcp_scrollbar.set, wrap=tk.WORD)
+        self.tcp_status_text = tk.Text(tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 12", yscrollcommand=tcp_scrollbar.set, wrap=tk.WORD, takefocus=False)
         self.tcp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tcp_scrollbar.config(command=self.tcp_status_text.yview)
 
@@ -592,7 +650,7 @@ class App:
             
         text_widget.config(state=tk.NORMAL)
         text_widget.delete('1.0', 'end')
-        text_widget.config(state=tk.DISABLED)
+        # text_widget.config(state=tk.DISABLED)
 
     def send_data(self):
         """Sends data from the input widgets based on the current active tab."""

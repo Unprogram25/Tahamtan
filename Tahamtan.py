@@ -17,6 +17,11 @@ import socket
 import subprocess
 import platform
 from ping3 import ping
+from queue import Queue
+
+# You can customize these fonts
+STATUS_FONT = ("Helvetica", 12, "bold")
+RTT_FONT = ("Helvetica", 12)
 
 # --- Global Constants ---
 # A list of standard baud rates
@@ -320,11 +325,11 @@ class TcpManager:
         self.ping_button = ttk.Button(input_frame, text="Ping", command=self.send_ping)
         self.ping_button.grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
 
-        self.ping_status_label = ttk.Label(input_frame, text="RTT: N/A", font=default_font)
+        self.ping_status_label = ttk.Label(input_frame, text="RTT : IDLE", font=default_font)
         self.ping_status_label.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
 
          # Ping result label to show the RTT value
-        self.ping_result_label = ttk.Label(input_frame, text="RTT: N/A", font=default_font)
+        self.ping_result_label = ttk.Label(input_frame, text="RTT : N/A", font=default_font)
         self.ping_result_label.grid(row=1, column=2, padx=5, pady=5, sticky=tk.W)
 
         # Status lights frame 
@@ -351,9 +356,11 @@ class TcpManager:
         Initiates an ICMP ping operation on a separate thread to avoid freezing the GUI.
         """
         self.ping_button.config(state=tk.DISABLED)
+        self.ping_queue = Queue()
         ping_thread = threading.Thread(target=self._run_ping_logic)
         ping_thread.daemon = True
         ping_thread.start()
+        self._check_ping_queue()
 
     def _run_ping_logic(self):
         """
@@ -362,34 +369,50 @@ class TcpManager:
         try:
             target_ip = self.ip_entry.get().strip()
             if not target_ip:
-                self.tab_frame.after(0, lambda: self._update_ping_gui("Status: No IP Provided", "RTT: N/A"))
+                self.ping_queue.put(("Status: No IP Provided", "RTT: N/A"))
                 return
 
-            self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Pinging...", "RTT: N/A"))
+            self.ping_queue.put(("Status: Pinging...", "RTT: N/A"))
             start_time = time.time()
-            rtt = ping(target_ip, timeout=2, unit="ms")
+            rtt = ping(target_ip, timeout=3, unit="ms")
             end_time = time.time()
 
             if rtt is None:
-                self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Timeout", "RTT: N/A"))
+                self.ping_queue.put(("Status: Timeout", "RTT: N/A"))
             else:
-                # Optional: compare with measured RTT for validation
                 measured_rtt = (end_time - start_time) * 1000
-                self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Success", f"RTT: {rtt:.2f} ms"))
+                self.ping_queue.put(("Status: Success", f"RTT: {rtt:.2f} ms"))
 
         except PermissionError:
-            self.tab_frame.after(0, lambda: self._update_ping_gui("Status: Admin Required", "RTT: N/A"))
+            self.ping_queue.put(("Status: Admin Required", "RTT: N/A"))
         except Exception as e:
-            self.tab_frame.after(0, lambda: self._update_ping_gui(f"Status: Error - {e}", "RTT: N/A"))
+            self.ping_queue.put((f"Status: Error - {e}", "RTT: N/A"))
         finally:
-            self.tab_frame.after(0, lambda: self.ping_button.config(state=tk.NORMAL))
+            self.ping_queue.put("ENABLE_BUTTON")
+
+    def _check_ping_queue(self):
+        """
+        Periodically checks the queue for updates from the ping thread.
+        """
+        try:
+            while not self.ping_queue.empty():
+                item = self.ping_queue.get_nowait()
+                if item == "ENABLE_BUTTON":
+                    self.ping_button.config(state=tk.NORMAL)
+                else:
+                    status_text, rtt_text = item
+                    self._update_ping_gui(status_text, rtt_text)
+        except Exception as e:
+            print("Queue error:", e)
+        finally:
+            self.tab_frame.after(100, self._check_ping_queue)
 
     def _update_ping_gui(self, status_text, rtt_text):
         """
         Safely updates GUI elements from a different thread.
         """
-        self.ping_status_label.config(text=status_text)
-        self.ping_result_label.config(text=rtt_text)
+        self.ping_status_label.config(text=status_text, font=STATUS_FONT, width= 15)
+        self.ping_result_label.config(text=rtt_text, font=RTT_FONT, width=8)
 
 
 

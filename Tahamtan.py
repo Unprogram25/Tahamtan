@@ -18,6 +18,7 @@ import subprocess
 import platform
 from ping3 import ping
 from queue import Queue
+from gui_util import safe_tk_call
 
 # You can customize these fonts
 STATUS_FONT = ("Helvetica", 10, "bold")
@@ -117,29 +118,30 @@ class SerialManager:
         """Creates all GUI widgets for the Serial tab."""
         # Serial input frame
         input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
-        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+        input_frame.pack(side=tk.TOP, fill=tk.X, pady=2)
 
         default_font = font.nametofont("TkDefaultFont")
         default_font.config(size=10) # Change 16 to your desired font size
 
-        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=0, padx=5, pady=2)
         self.ports_combobox = ttk.Combobox(input_frame, values=self.scan_ports(), state="readonly", width=11, font=default_font)
-        self.ports_combobox.grid(row=0, column=1, padx=2, pady=5)
+        self.ports_combobox.grid(row=0, column=1, padx=2, pady=2)
         
-        ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=2)
         self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="readonly", width=6, font=default_font)
-        self.baud_combobox.grid(row=0, column=3, padx=5, pady=5)
+        self.baud_combobox.grid(row=0, column=3, padx=5, pady=2)
         self.baud_combobox.set(115200)
 
+        input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
-        self.connect_button.grid(row=0, column=4, padx=5, pady=5)
+        self.connect_button.grid(row=0, column=4, padx=5, pady=2, sticky="ew")
         
         refresh_button = ttk.Button(input_frame, text="Refresh", command=self.update_port_list)
-        refresh_button.grid(row=1, column=1, padx=5, pady=0)
+        refresh_button.grid(row=1, column=0, padx=2, pady=2)
         
         # Status lights frame
         lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
-        lights_frame.grid(row=1, column=4, padx=5, pady=0, sticky=tk.E)
+        lights_frame.grid(row=1, column=4, padx=5, pady=2, sticky=tk.E)
         
         self.disconnected_canvas = tk.Canvas(lights_frame, width=25, height=25)
         self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
@@ -318,8 +320,9 @@ class TcpManager:
         self.port_entry.grid(row=0, column=3, padx=5, pady=5)
         self.port_entry.insert(0, "8585")
         
+        input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
-        self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky='e')
+        self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky='ew')
         
         # Add a ping button and a status label in the next row
         self.ping_button = ttk.Button(input_frame, text="Ping", command=self.send_ping)
@@ -541,26 +544,175 @@ class TcpManager:
             self.ip_entry.config(state="normal")
             self.port_entry.config(state="normal")
         self.status_text.see(tk.END)
+
+class TcpServerManager:
+    """Manages TCP server logic and GUI."""
+    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+        self.tab_frame = tab_frame
+        self.status_text = status_text_widget
+        self.eol_widgets = eol_widgets
+        self.server_socket = None
+        self.client_threads = []
+        self.is_running = False
+        self.port_entry = None
+        self.start_button = None
+        self.create_server_widgets()
+        self.client_sockets = []
+
+    def create_server_widgets(self):
+        """Creates GUI widgets for TCP Server tab."""
+        input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+
+        ttk.Label(input_frame, text="Port:", font="TkDefaultFont 10").grid(row=0, column=0, padx=5, pady=5)
+        self.port_entry = ttk.Entry(input_frame, width=10, font="TkDefaultFont 10")
+        self.port_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.port_entry.insert(0, "8585")
+
+        self.start_button = ttk.Button(input_frame, text="Listen", command=self.toggle_server_threaded)
+        self.start_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+
+        input_frame.columnconfigure(2, weight=1)
+
+    def toggle_server_threaded(self):
+        """Starts or stops the server in a separate thread."""
+        thread = threading.Thread(target=self.toggle_server, daemon=True)
+        thread.start()
+
+    def toggle_server(self):
+        """Handles server start/stop logic."""
+        if self.is_running:
+            self.stop_server()
+        else:
+            self.start_server()
+
+    def start_server(self):
+        """Initializes and starts the TCP server."""
+        try:
+            port = int(self.port_entry.get())
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+
+            self.server_socket.bind(('', port))
+            self.server_socket.listen(5)
+            self.is_running = True
+            self._log(f"TCP Server started on port {port}", 'connected')
+            threading.Thread(target=self.accept_clients, daemon=True).start()
+            self.start_button.config(text="Stop Server")
+        except Exception as e:
+            self._log(f"Error starting server: {e}", 'error')
+
+    def stop_server(self):
+        """Stops the TCP server and closes all connections."""
+        self.is_running = False
+        try:
+            if self.server_socket:
+                self.server_socket.close()
+                self.server_socket = None
+            self._log("TCP Server stopped", 'disconnected')
+        except Exception as e:
+            self._log(f"Error stopping server: {e}", 'error')
+        self.start_button.config(text="Listen")
+
+
+    def accept_clients(self):
+        """Accepts incoming client connections."""
+        while self.is_running:
+            try:
+                client_socket, addr = self.server_socket.accept()
+                self.client_sockets.append(client_socket)
+                self._log(f"Client connected from {addr}", 'connected')
+                thread = threading.Thread(target=self.handle_client, args=(client_socket, addr), daemon=True)
+                thread.start()
+                self.client_threads.append(thread)
+            except Exception as e:
+                self._log(f"Error accepting client: {e}", 'error')
+
+    def handle_client(self, client_socket, addr):
+        """Handles communication with a connected client."""
+        try:
+            while self.is_running:
+                data = client_socket.recv(1024)
+                if not data:
+                    break
+                self._log(f"Received from {addr}: {data.decode()}", 'info')
+                client_socket.sendall(data)  # Echo back
+        except Exception as e:
+            self._log(f"Error with client {addr}: {e}", 'error')
+        finally:
+            client_socket.close()
+            if client_socket in self.client_sockets:
+                self.client_sockets.remove(client_socket)
+            self._log(f"Client {addr} disconnected", 'disconnected')
+
+    def _log(self, message, tag='info'):
+        """Logs messages to the status text widget with color tags."""
+        self.status_text.tag_configure('connected', foreground='green')
+        self.status_text.tag_configure('disconnected', foreground='red')
+        self.status_text.tag_configure('error', foreground='Maroon')
+        self.status_text.tag_configure('info', foreground='black')
+        self.status_text.insert(tk.END, f"{message}\n", tag)
+        self.status_text.see(tk.END)   
+
+    def send_data(self, base_message):
+        """Broadcasts data to all connected TCP clients."""
+        eol_option = self.eol_widgets[0].get()
+        display_eol_var = self.eol_widgets[1]
+
+        if not self.client_sockets:
+            self.status_text.insert(tk.END, "Error: No TCP clients are connected.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+        if eol_option == "\\r\\n":
+            final_message = base_message + '\r\n'
+        elif eol_option == "\\n":
+            final_message = base_message + '\n'
+        elif eol_option == "\\r":
+            final_message = base_message + '\r'
+        else:
+            final_message = base_message
+
+        for client_sock in list(self.client_sockets):
+            try:
+                client_sock.sendall(final_message.encode('utf-8'))
+                if display_eol_var.get():
+                    display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
+                else:
+                    display_message = base_message
+                peer = client_sock.getpeername()
+                self.status_text.insert(tk.END, f"Sent to {peer}: {display_message}\n", 'sent')
+            except socket.error as e:
+                peer = client_sock.getpeername() if client_sock.fileno() != -1 else 'Unknown'
+                self.status_text.insert(tk.END, f"Error sending to {peer}: {e}\n", 'error')
+                client_sock.close()
+                self.client_sockets.remove(client_sock)
+                self.status_text.see(tk.END) 
+
+
 class App:
     """The main application class that sets up the GUI and manages tabs."""
     def __init__(self, window):
         self.window = window
         self.window.title("Tahamtan Serial/TCP Comm | Dev by Afshin Moradzadeh")
-        self.window.geometry("515x625")
+        self.window.geometry("515x615")
         self.window.configure(bg="#F0F0F0")
         # window.resizable(False, False)
 
         self.style = ttk.Style()
-        self.style.configure("TCombobox", font="TkDefaultFont 11")
-        self.style.configure("TButton", font="TkDefaultFont 11")
-        self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 11))
+        self.style.configure("TCombobox", font="TkDefaultFont 10")
+        self.style.configure("TButton", font="TkDefaultFont 10")
+        self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 10))
       
         self.setup_gui()
         
     def setup_gui(self):
         """Sets up the main GUI components including the notebook and tabs."""
         main_frame = tk.Frame(self.window, bg="#F0F0F0")
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
               
         self.tab_control = ttk.Notebook(main_frame)
         self.tab_control.pack(fill=tk.BOTH, expand=True)
@@ -571,15 +723,21 @@ class App:
 
         tcp_tab = ttk.Frame(self.tab_control)
         self.tab_control.add(tcp_tab, text="TCP Client")
+
+        tcp_server_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(tcp_server_tab, text="TCP Server")
         
         # Create a single Text widget with a scrollbar for each tab
         # This will be passed to the respective Manager class
         # Serial Status/Output Text Box
         serial_text_with_scroll_frame = tk.Frame(serial_tab, bg="#F0F0F0")
-        serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
+        serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
         serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
         serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.serial_status_text = tk.Text(serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11", yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False)
+        self.serial_status_text = tk.Text(
+            serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 10",
+            yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+        )
         self.serial_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         serial_scrollbar.config(command=self.serial_status_text.yview)
 
@@ -588,9 +746,24 @@ class App:
         tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
         tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tcp_status_text = tk.Text(tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11", yscrollcommand=tcp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False)
+        self.tcp_status_text = tk.Text(
+            tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11", 
+            yscrollcommand=tcp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+        )
         self.tcp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tcp_scrollbar.config(command=self.tcp_status_text.yview)
+
+        # TCP Server Status/Output Text Box
+        tcp_server_text_frame = tk.Frame(tcp_server_tab, bg="#F0F0F0")
+        tcp_server_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
+        tcp_server_scrollbar = tk.Scrollbar(tcp_server_text_frame)
+        tcp_server_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tcp_server_status_text = tk.Text(
+            tcp_server_text_frame, height=20, width=30, font="TkDefaultFont 11",
+            yscrollcommand=tcp_server_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+        )
+        self.tcp_server_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tcp_server_scrollbar.config(command=self.tcp_server_status_text.yview)
 
         # Configure the 'sent', 'received' etc. tags
         self.serial_status_text.tag_configure('sent', foreground='blue')
@@ -603,9 +776,14 @@ class App:
         self.tcp_status_text.tag_configure('error', foreground='red')
         self.tcp_status_text.tag_configure('warning', foreground='orange')
 
+        self.tcp_server_status_text.tag_configure('sent', foreground='blue')
+        self.tcp_server_status_text.tag_configure('received', foreground='green')
+        self.tcp_server_status_text.tag_configure('error', foreground='red')
+        self.tcp_server_status_text.tag_configure('warning', foreground='orange')
+
         # --- Create the shared Send Frame at the bottom ---
         send_frame = tk.Frame(main_frame, bg="#F0F0F0")
-        send_frame.pack(fill=tk.X, pady=10)
+        send_frame.pack(fill=tk.X, pady=5)
         send_frame.columnconfigure(1, weight=1)
 
         # 1. Preset combobox
@@ -619,7 +797,7 @@ class App:
         self.message_entry.grid(row=0, column=1, padx=1, pady=1, sticky="nsew")
 
         # 3. EOL combobox
-        eol_label = ttk.Label(send_frame, text="EOL :", font="TkDefaultFont 12")
+        eol_label = ttk.Label(send_frame, text="EOL :", font="TkDefaultFont 9")
         eol_label.grid(row=0, column=2, padx=1, pady=5)
         self.eol_combobox = ttk.Combobox(send_frame, values=EOL_OPTIONS, state="readonly", width=5, font="TkDefaultFont 12")
         self.eol_combobox.grid(row=0, column=3, padx=1, pady=5)
@@ -636,7 +814,7 @@ class App:
 
         # 5. Send button
         send_button = ttk.Button(send_frame, text="Send", command=self.send_data)
-        send_button.grid(row=1, column=1, columnspan=1, pady=5, sticky="ew")
+        send_button.grid(row=1, column=1, columnspan=1, pady=(10,3), sticky="ew")
 
         # 6. Dynamic config widgets (initially hidden)
         self.conf_key_combobox = None
@@ -645,7 +823,8 @@ class App:
         # --- Instantiate the managers after the Text widgets are created ---
         self.serial_manager = SerialManager(serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var))
         self.tcp_manager = TcpManager(tcp_tab, self.tcp_status_text, (self.eol_combobox, self.display_eol_var))
-        
+        self.tcp_server_manager = TcpServerManager(tcp_server_tab, self.tcp_server_status_text, (self.eol_combobox, self.display_eol_var))
+
         # Bind the Ctrl+L keyboard shortcut to the clear function
         self.window.bind('<Control-l>', self.clear_status_box)
         self.window.bind('<Control-L>', self.clear_status_box)
@@ -669,6 +848,9 @@ class App:
         elif current_tab_index == 1:
             # Clear the EOL combobox for the TCP tab
             self.eol_combobox.set("")
+        elif current_tab_index == 2:  # TCP Server tab
+            self.eol_combobox.set("")
+
 
     def clear_status_box(self, event):
         """Clears all content from the status_box widget of the current tab."""
@@ -677,6 +859,8 @@ class App:
             text_widget = self.serial_status_text
         elif current_tab == "TCP Client":
             text_widget = self.tcp_status_text
+        elif current_tab == "TCP Server":
+            text_widget = self.tcp_server_status_text
         else:
             return
             
@@ -695,6 +879,9 @@ class App:
         elif current_tab_text == "TCP Client":
             text_widget = self.tcp_status_text
             manager = self.tcp_manager
+        elif current_tab_text == "TCP Server":
+            text_widget = self.tcp_server_status_text
+            manager = self.tcp_server_manager
         else:
             return
 
@@ -763,4 +950,6 @@ if __name__ == "__main__":
     if app.serial_manager.ser and app.serial_manager.ser.is_open:
         app.serial_manager.ser.close()
     if app.tcp_manager.is_connected:
+        app.tcp_manager.disconnect()
+    if app.tcp_server_manager.is_running:
         app.tcp_manager.disconnect()

@@ -546,7 +546,6 @@ class TcpManager:
         self.status_text.see(tk.END)
 
 class TcpServerManager:
-    """Manages TCP server logic and GUI."""
     def __init__(self, tab_frame, status_text_widget, eol_widgets):
         self.tab_frame = tab_frame
         self.status_text = status_text_widget
@@ -556,11 +555,10 @@ class TcpServerManager:
         self.is_running = False
         self.port_entry = None
         self.start_button = None
-        self.create_server_widgets()
         self.client_sockets = []
+        self.create_server_widgets()
 
     def create_server_widgets(self):
-        """Creates GUI widgets for TCP Server tab."""
         input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
         input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
 
@@ -571,23 +569,19 @@ class TcpServerManager:
 
         self.start_button = ttk.Button(input_frame, text="Listen", command=self.toggle_server_threaded)
         self.start_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
-
         input_frame.columnconfigure(2, weight=1)
 
     def toggle_server_threaded(self):
-        """Starts or stops the server in a separate thread."""
         thread = threading.Thread(target=self.toggle_server, daemon=True)
         thread.start()
 
     def toggle_server(self):
-        """Handles server start/stop logic."""
         if self.is_running:
             self.stop_server()
         else:
             self.start_server()
 
     def start_server(self):
-        """Initializes and starts the TCP server."""
         try:
             port = int(self.port_entry.get())
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -607,59 +601,71 @@ class TcpServerManager:
             self._log(f"Error starting server: {e}", 'error')
 
     def stop_server(self):
-        """Stops the TCP server and closes all connections."""
         self.is_running = False
         try:
+            for client_sock in self.client_sockets:
+                try:
+                    client_sock.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+                client_sock.close()
+            self.client_sockets.clear()
+
             if self.server_socket:
                 self.server_socket.close()
                 self.server_socket = None
+
             self._log("TCP Server stopped", 'disconnected')
         except Exception as e:
             self._log(f"Error stopping server: {e}", 'error')
         self.start_button.config(text="Listen")
 
-
     def accept_clients(self):
-        """Accepts incoming client connections."""
-        while self.is_running:
+        while self.is_running and self.server_socket:
             try:
                 client_socket, addr = self.server_socket.accept()
+                client_socket.settimeout(1.0)  # جلوگیری از گیر افتادن در recv
                 self.client_sockets.append(client_socket)
                 self._log(f"Client connected from {addr}", 'connected')
                 thread = threading.Thread(target=self.handle_client, args=(client_socket, addr), daemon=True)
                 thread.start()
                 self.client_threads.append(thread)
-            except Exception as e:
+            except OSError as e:
+                if not self.is_running:
+                    break
                 self._log(f"Error accepting client: {e}", 'error')
 
     def handle_client(self, client_socket, addr):
-        """Handles communication with a connected client."""
         try:
             while self.is_running:
-                data = client_socket.recv(1024)
-                if not data:
+                if client_socket.fileno() == -1:
                     break
-                self._log(f"Received from {addr}: {data.decode()}", 'info')
-                client_socket.sendall(data)  # Echo back
-        except Exception as e:
-            self._log(f"Error with client {addr}: {e}", 'error')
+                try:
+                    data = client_socket.recv(1024)
+                    if not data:
+                        break
+                    self._log(f"Received from {addr}: {data.decode()}", 'info')
+                    client_socket.sendall(data)
+                except socket.timeout:
+                    continue
+                except (ConnectionResetError, OSError) as e:
+                    self._log(f"Connection error with {addr}: {e}", 'error')
+                    break
         finally:
-            client_socket.close()
+            try:
+                client_socket.close()
+            except Exception:
+                pass
             if client_socket in self.client_sockets:
                 self.client_sockets.remove(client_socket)
             self._log(f"Client {addr} disconnected", 'disconnected')
 
-    def _log(self, message, tag='info'):
-        """Logs messages to the status text widget with color tags."""
-        self.status_text.tag_configure('connected', foreground='green')
-        self.status_text.tag_configure('disconnected', foreground='red')
-        self.status_text.tag_configure('error', foreground='Maroon')
-        self.status_text.tag_configure('info', foreground='black')
-        self.status_text.insert(tk.END, f"{message}\n", tag)
-        self.status_text.see(tk.END)   
-
     def send_data(self, base_message):
-        """Broadcasts data to all connected TCP clients."""
+        if not self.is_running:
+            self.status_text.insert(tk.END, "Error: Server is not running.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+
         eol_option = self.eol_widgets[0].get()
         display_eol_var = self.eol_widgets[1]
 
@@ -667,6 +673,7 @@ class TcpServerManager:
             self.status_text.insert(tk.END, "Error: No TCP clients are connected.\n", 'error')
             self.status_text.see(tk.END)
             return
+
         if eol_option == "\\r\\n":
             final_message = base_message + '\r\n'
         elif eol_option == "\\n":
@@ -677,21 +684,41 @@ class TcpServerManager:
             final_message = base_message
 
         for client_sock in list(self.client_sockets):
+            if client_sock.fileno() == -1:
+                self.client_sockets.remove(client_sock)
+                continue
             try:
                 client_sock.sendall(final_message.encode('utf-8'))
-                if display_eol_var.get():
-                    display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
-                else:
-                    display_message = base_message
-                peer = client_sock.getpeername()
+                display_message = (
+                    final_message.replace('\r', '\\r').replace('\n', '\\n')
+                    if display_eol_var.get() else base_message
+                )
+                try:
+                    peer = client_sock.getpeername()
+                except OSError:
+                    peer = 'Unknown'
                 self.status_text.insert(tk.END, f"Sent to {peer}: {display_message}\n", 'sent')
-            except socket.error as e:
-                peer = client_sock.getpeername() if client_sock.fileno() != -1 else 'Unknown'
+            except (socket.error, OSError) as e:
+                try:
+                    peer = client_sock.getpeername()
+                except OSError:
+                    peer = 'Unknown'
                 self.status_text.insert(tk.END, f"Error sending to {peer}: {e}\n", 'error')
-                client_sock.close()
-                self.client_sockets.remove(client_sock)
-                self.status_text.see(tk.END) 
+                try:
+                    client_sock.close()
+                except Exception:
+                    pass
+                if client_sock in self.client_sockets:
+                    self.client_sockets.remove(client_sock)
+            self.status_text.see(tk.END)
 
+    def _log(self, message, tag='info'):
+        self.status_text.tag_configure('connected', foreground='green')
+        self.status_text.tag_configure('disconnected', foreground='red')
+        self.status_text.tag_configure('error', foreground='Maroon')
+        self.status_text.tag_configure('info', foreground='black')
+        self.status_text.insert(tk.END, f"{message}\n", tag)
+        self.status_text.see(tk.END)
 
 class App:
     """The main application class that sets up the GUI and manages tabs."""

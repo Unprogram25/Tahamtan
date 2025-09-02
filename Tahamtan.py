@@ -720,6 +720,170 @@ class TcpServerManager:
         self.status_text.insert(tk.END, f"{message}\n", tag)
         self.status_text.see(tk.END)
 
+class UdpManager:
+    """Manages all UDP communication and its corresponding GUI elements."""
+    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+        self.tab_frame = tab_frame
+        self.status_text = status_text_widget
+        self.eol_widgets = eol_widgets
+        self.sock = None
+        self.is_connected = False
+        self.read_thread = None
+        self.create_udp_widgets()
+
+    def create_udp_widgets(self):
+        """Creates all GUI widgets for the UDP tab."""
+        input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+        
+        default_font = font.nametofont("TkDefaultFont")
+        default_font.config(size=10)
+
+        ttk.Label(input_frame, text="Local Port :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
+        self.local_port_entry = ttk.Entry(input_frame, width=8, font=default_font)
+        self.local_port_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.local_port_entry.insert(0, "9000")
+
+        ttk.Label(input_frame, text="Dest. IP :", font=default_font).grid(row=1, column=0, padx=5, pady=5)
+        self.dest_ip_entry = ttk.Entry(input_frame, width=15, font=default_font)
+        self.dest_ip_entry.grid(row=1, column=1, padx=5, pady=5)
+        self.dest_ip_entry.insert(0, "192.168.1.200")
+
+        ttk.Label(input_frame, text="Dest. Port:", font=default_font).grid(row=1, column=2, padx=5, pady=5)
+        self.dest_port_entry = ttk.Entry(input_frame, width=8, font=default_font)
+        self.dest_port_entry.grid(row=1, column=3, padx=5, pady=5)
+        self.dest_port_entry.insert(0, "9001")
+
+        input_frame.columnconfigure(4, weight=1)
+        self.connect_button = ttk.Button(input_frame, text="Listen", command=self.toggle_connection_threaded)
+        self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky='ew')
+        
+        # Status lights frame 
+        lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
+        lights_frame.grid(row=1, column=4, padx=5, pady=0, sticky=tk.E)
+        
+        self.disconnected_canvas = tk.Canvas(lights_frame, width=25, height=25)
+        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
+        create_circle(self.disconnected_canvas, 12, 12, 10, "red")
+        
+        self.connecting_canvas = tk.Canvas(lights_frame, width=25, height=25)
+        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=0)
+        create_circle(self.connecting_canvas, 12, 12, 10, "gray")
+        
+        self.connected_canvas = tk.Canvas(lights_frame, width=25, height=25)
+        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
+        create_circle(self.connected_canvas, 12, 12, 10, "gray")
+        
+        self.update_ui(connected=False)
+
+    def toggle_connection_threaded(self):
+        thread = threading.Thread(target=self._toggle_connection_logic, daemon=True)
+        thread.start()
+
+    def _toggle_connection_logic(self):
+        if self.is_connected:
+            self.disconnect()
+        else:
+            self.connect()
+
+    def connect(self):
+        """Binds the UDP socket to a local port."""
+        local_port = self.local_port_entry.get()
+        if not local_port:
+            self.status_text.insert(tk.END, "Error: A local port is required to listen.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+        
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind(('', int(local_port)))
+            self.is_connected = True
+            self.status_text.insert(tk.END, f"Listening on UDP port {local_port}\n", 'connected')
+            self.status_text.see(tk.END)
+            self.read_thread = threading.Thread(target=self.read_from_socket, daemon=True)
+            self.read_thread.start()
+            self.tab_frame.after(0, lambda: self.update_ui(connected=True))
+        except (socket.error, ValueError) as e:
+            self.status_text.insert(tk.END, f"Error: Could not bind to port. {e}\n", 'error')
+            self.status_text.see(tk.END)
+            self.is_connected = False
+            self.tab_frame.after(0, lambda: self.update_ui(connected=False))
+
+    def disconnect(self):
+        """Closes the UDP socket safely."""
+        self.is_connected = False
+        if self.sock:
+            self.sock.close()
+        self.sock = None
+        self.status_text.insert(tk.END, "UDP socket closed.\n", 'disconnected')
+        self.status_text.see(tk.END)
+        self.tab_frame.after(0, lambda: self.update_ui(connected=False))
+
+    def read_from_socket(self):
+        """Reads data from the UDP socket in a separate thread."""
+        while self.is_connected and self.sock:
+            try:
+                data, addr = self.sock.recvfrom(1024)
+                decoded_data = data.decode('utf-8', errors='ignore')
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Received from {addr}: {decoded_data}\n", 'received'))
+                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+                winsound.Beep(1115, 95)
+            except socket.error as e:
+                if self.is_connected:
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket error: {e}\n", 'error'))
+                self.disconnect()
+                break
+
+    def send_data(self, base_message):
+        """Sends data through the UDP socket."""
+        dest_ip = self.dest_ip_entry.get()
+        dest_port = self.dest_port_entry.get()
+        
+        if not self.is_connected:
+            self.status_text.insert(tk.END, "Error: UDP socket is not listening.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+        
+        if not dest_ip or not dest_port:
+            self.status_text.insert(tk.END, "Error: Destination IP and Port are required for sending.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+
+        eol_option = self.eol_widgets[0].get()
+        display_eol_var = self.eol_widgets[1]
+
+        if eol_option == "\\r\\n":
+            final_message = base_message + '\r\n'
+        elif eol_option == "\\n":
+            final_message = base_message + '\n'
+        elif eol_option == "\\r":
+            final_message = base_message + '\r'
+        else:
+            final_message = base_message
+        
+        try:
+            self.sock.sendto(final_message.encode('utf-8'), (dest_ip, int(dest_port)))
+            if display_eol_var.get():
+                display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
+            else:
+                display_message = base_message
+            self.status_text.insert(tk.END, f"Sent to {dest_ip}:{dest_port}: {display_message}\n", 'sent')
+        except (socket.error, ValueError) as e:
+            self.status_text.insert(tk.END, f"Error sending data: {e}\n", 'error')
+        self.status_text.see(tk.END)
+
+    def update_ui(self, connected):
+        """Updates the UI elements after a connection attempt for the given protocol."""
+        if connected:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connected")
+            self.connect_button.config(text="Stop")
+            self.local_port_entry.config(state="disabled")
+        else:
+            update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected")
+            self.connect_button.config(text="Listen")
+            self.local_port_entry.config(state="normal")
+        self.status_text.see(tk.END)
+
 class App:
     """The main application class that sets up the GUI and manages tabs."""
     def __init__(self, window):
@@ -733,6 +897,13 @@ class App:
         self.style.configure("TCombobox", font="TkDefaultFont 10")
         self.style.configure("TButton", font="TkDefaultFont 10")
         self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 10))
+
+        # Initialize tab variables to None to prevent errors before setup
+        self.serial_tab = None
+        self.tcp_tab = None
+        self.tcp_server_tab = None
+        self.udp_tab = None
+        self.tab_control = None
       
         self.setup_gui()
         
@@ -745,19 +916,22 @@ class App:
         self.tab_control.pack(fill=tk.BOTH, expand=True)
         
         # --- Create tabs and their content ---
-        serial_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(serial_tab, text="Serial")
+        self.serial_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.serial_tab, text="Serial")
 
-        tcp_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(tcp_tab, text="TCP Client")
+        self.tcp_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.tcp_tab, text="TCP Client")
 
-        tcp_server_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(tcp_server_tab, text="TCP Server")
+        self.tcp_server_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.tcp_server_tab, text="TCP Server")
+
+        self.udp_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.udp_tab, text="UDP")
         
         # Create a single Text widget with a scrollbar for each tab
         # This will be passed to the respective Manager class
         # Serial Status/Output Text Box
-        serial_text_with_scroll_frame = tk.Frame(serial_tab, bg="#F0F0F0")
+        serial_text_with_scroll_frame = tk.Frame(self.serial_tab, bg="#F0F0F0")
         serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
         serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
         serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -769,7 +943,7 @@ class App:
         serial_scrollbar.config(command=self.serial_status_text.yview)
 
         # TCP Status/Output Text Box
-        tcp_text_with_scroll_frame = tk.Frame(tcp_tab, bg="#F0F0F0")
+        tcp_text_with_scroll_frame = tk.Frame(self.tcp_tab, bg="#F0F0F0")
         tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
         tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -781,7 +955,7 @@ class App:
         tcp_scrollbar.config(command=self.tcp_status_text.yview)
 
         # TCP Server Status/Output Text Box
-        tcp_server_text_frame = tk.Frame(tcp_server_tab, bg="#F0F0F0")
+        tcp_server_text_frame = tk.Frame(self.tcp_server_tab, bg="#F0F0F0")
         tcp_server_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
         tcp_server_scrollbar = tk.Scrollbar(tcp_server_text_frame)
         tcp_server_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -791,6 +965,18 @@ class App:
         )
         self.tcp_server_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tcp_server_scrollbar.config(command=self.tcp_server_status_text.yview)
+
+        # UDP Status/Output Text Box
+        udp_text_frame = tk.Frame(self.udp_tab, bg="#F0F0F0")
+        udp_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
+        udp_scrollbar = tk.Scrollbar(tcp_server_text_frame)
+        udp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.udp_status_text = tk.Text(
+            udp_text_frame, height=20, width=30, font="TkDefaultFont 11",
+            yscrollcommand=udp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+        )
+        self.udp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        udp_scrollbar.config(command=self.udp_status_text.yview)
 
         # Configure the 'sent', 'received' etc. tags
         self.serial_status_text.tag_configure('sent', foreground='blue')
@@ -807,6 +993,11 @@ class App:
         self.tcp_server_status_text.tag_configure('received', foreground='green')
         self.tcp_server_status_text.tag_configure('error', foreground='red')
         self.tcp_server_status_text.tag_configure('warning', foreground='orange')
+
+        self.udp_status_text.tag_configure('sent', foreground='blue')
+        self.udp_status_text.tag_configure('received', foreground='green')
+        self.udp_status_text.tag_configure('error', foreground='red')
+        self.udp_status_text.tag_configure('warning', foreground='orange')
 
         # --- Create the shared Send Frame at the bottom ---
         send_frame = tk.Frame(main_frame, bg="#F0F0F0")
@@ -848,9 +1039,10 @@ class App:
         self.conf_value_entry = None
         
         # --- Instantiate the managers after the Text widgets are created ---
-        self.serial_manager = SerialManager(serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var))
-        self.tcp_manager = TcpManager(tcp_tab, self.tcp_status_text, (self.eol_combobox, self.display_eol_var))
-        self.tcp_server_manager = TcpServerManager(tcp_server_tab, self.tcp_server_status_text, (self.eol_combobox, self.display_eol_var))
+        self.serial_manager = SerialManager(self.serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var))
+        self.tcp_manager = TcpManager(self.tcp_tab, self.tcp_status_text, (self.eol_combobox, self.display_eol_var))
+        self.tcp_server_manager = TcpServerManager(self.tcp_server_tab, self.tcp_server_status_text, (self.eol_combobox, self.display_eol_var))
+        self.udp_manager = UdpManager(self.udp_tab, self.udp_status_text, (self.eol_combobox, self.display_eol_var)) 
 
         # Bind the Ctrl+L keyboard shortcut to the clear function
         self.window.bind('<Control-l>', self.clear_status_box)
@@ -888,6 +1080,8 @@ class App:
             text_widget = self.tcp_status_text
         elif current_tab == "TCP Server":
             text_widget = self.tcp_server_status_text
+        elif current_tab == "UDP":
+            text_widget = self.udp_status_text
         else:
             return
             
@@ -909,6 +1103,9 @@ class App:
         elif current_tab_text == "TCP Server":
             text_widget = self.tcp_server_status_text
             manager = self.tcp_server_manager
+        elif current_tab_text == "UDP":
+            text_widget = self.udp_status_text
+            manager = self.udp_manager
         else:
             return
 
@@ -979,4 +1176,6 @@ if __name__ == "__main__":
     if app.tcp_manager.is_connected:
         app.tcp_manager.disconnect()
     if app.tcp_server_manager.is_running:
+        app.tcp_manager.disconnect()
+    if app.udp_manager.is_connected:
         app.tcp_manager.disconnect()

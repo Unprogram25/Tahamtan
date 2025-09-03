@@ -628,7 +628,7 @@ class TcpServerManager:
         while self.is_running and self.server_socket:
             try:
                 client_socket, addr = self.server_socket.accept()
-                client_socket.settimeout(1.0)  # جلوگیری از گیر افتادن در recv
+                client_socket.settimeout(1.0) 
                 self.client_sockets.append(client_socket)
                 self._log(f"Client connected from {addr}", 'connected')
                 thread = threading.Thread(target=self.handle_client, args=(client_socket, addr), daemon=True)
@@ -649,12 +649,13 @@ class TcpServerManager:
                     if not data:
                         break
                     self._log(f"Received from {addr}: {data.decode()}", 'info')
+                    winsound.Beep(1415, 95)
                     client_socket.sendall(data)
                 except socket.timeout:
                     continue
-                except (ConnectionResetError, OSError) as e:
-                    self._log(f"Connection error with {addr}: {e}", 'error')
-                    break
+                # except (ConnectionResetError, OSError) as e:
+                #     self._log(f"Connection error with {addr}: {e}", 'error')
+                #     break
         finally:
             try:
                 client_socket.close()

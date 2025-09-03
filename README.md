@@ -1,4 +1,4 @@
-# Tahamtan — ابزار گرافیکی ارتباط سریال و TCP
+# Tahamtan — ابزار گرافیکی ارتباط سریال و شبکه
 نسخه: 1.0.0  
 نویسنده: Afshin Moradzadeh (Dev by Afshin Moradzadeh)  
 محل ذخیرهٔ پیکربندی: `config.json` (در مسیر جاری که برنامه اجرا می‌شود)

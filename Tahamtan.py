@@ -136,8 +136,9 @@ class SerialManager:
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
         self.connect_button.grid(row=0, column=4, padx=5, pady=2, sticky="ew")
         
+        
         refresh_button = ttk.Button(input_frame, text="Refresh", command=self.update_port_list)
-        refresh_button.grid(row=1, column=0, padx=2, pady=2)
+        refresh_button.grid(row=1, column=0, columnspan=4, padx=2, pady=2, sticky="ew")
         
         # Status lights frame
         lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
@@ -562,8 +563,8 @@ class TcpServerManager:
         input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
         input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
 
-        ttk.Label(input_frame, text="Port:", font="TkDefaultFont 10").grid(row=0, column=0, padx=5, pady=5)
-        self.port_entry = ttk.Entry(input_frame, width=10, font="TkDefaultFont 10")
+        ttk.Label(input_frame, text="Port :", font="TkDefaultFont 10").grid(row=0, column=0, padx=5, pady=5)
+        self.port_entry = ttk.Entry(input_frame, width=8, font="TkDefaultFont 10")
         self.port_entry.grid(row=0, column=1, padx=5, pady=5)
         self.port_entry.insert(0, "8585")
 
@@ -597,6 +598,7 @@ class TcpServerManager:
             self._log(f"TCP Server started on port {port}", 'connected')
             threading.Thread(target=self.accept_clients, daemon=True).start()
             self.start_button.config(text="Stop Server")
+            self.port_entry.config(state="disabled")
         except Exception as e:
             self._log(f"Error starting server: {e}", 'error')
 
@@ -614,11 +616,13 @@ class TcpServerManager:
             if self.server_socket:
                 self.server_socket.close()
                 self.server_socket = None
+                self.port_entry.config(state="enabled")
 
             self._log("TCP Server stopped", 'disconnected')
         except Exception as e:
             self._log(f"Error stopping server: {e}", 'error')
         self.start_button.config(text="Listen")
+        self.port_entry.config(state="enabled")
 
     def accept_clients(self):
         while self.is_running and self.server_socket:
@@ -754,10 +758,12 @@ class UdpManager:
         self.dest_port_entry.grid(row=1, column=3, padx=5, pady=5)
         self.dest_port_entry.insert(0, "9001")
 
+        input_frame.columnconfigure(2, weight=1)
+        input_frame.columnconfigure(3, weight=1)
         input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Listen", command=self.toggle_connection_threaded)
-        self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky='ew')
-        
+        self.connect_button.grid(row=0, column=2, columnspan=3, padx=5, pady=5, sticky='ew')
+
         # Status lights frame 
         lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
         lights_frame.grid(row=1, column=4, padx=5, pady=0, sticky=tk.E)
@@ -931,49 +937,49 @@ class App:
         # Create a single Text widget with a scrollbar for each tab
         # This will be passed to the respective Manager class
         # Serial Status/Output Text Box
-        serial_text_with_scroll_frame = tk.Frame(self.serial_tab, bg="#F0F0F0")
+        serial_text_with_scroll_frame = tk.Frame(self.serial_tab)
         serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
         serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
         serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.serial_status_text = tk.Text(
-            serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 10",
+            serial_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11",
             yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
         )
         self.serial_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         serial_scrollbar.config(command=self.serial_status_text.yview)
 
         # TCP Status/Output Text Box
-        tcp_text_with_scroll_frame = tk.Frame(self.tcp_tab, bg="#F0F0F0")
+        tcp_text_with_scroll_frame = tk.Frame(self.tcp_tab)
         tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
         tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tcp_status_text = tk.Text(
             tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11", 
-            yscrollcommand=tcp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+            yscrollcommand=tcp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#FFF9F9"
         )
         self.tcp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tcp_scrollbar.config(command=self.tcp_status_text.yview)
 
         # TCP Server Status/Output Text Box
-        tcp_server_text_frame = tk.Frame(self.tcp_server_tab, bg="#F0F0F0")
+        tcp_server_text_frame = tk.Frame(self.tcp_server_tab)
         tcp_server_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
         tcp_server_scrollbar = tk.Scrollbar(tcp_server_text_frame)
         tcp_server_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tcp_server_status_text = tk.Text(
             tcp_server_text_frame, height=20, width=30, font="TkDefaultFont 11",
-            yscrollcommand=tcp_server_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+            yscrollcommand=tcp_server_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#F8F8FA"
         )
         self.tcp_server_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tcp_server_scrollbar.config(command=self.tcp_server_status_text.yview)
 
         # UDP Status/Output Text Box
-        udp_text_frame = tk.Frame(self.udp_tab, bg="#F0F0F0")
+        udp_text_frame = tk.Frame(self.udp_tab)
         udp_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
         udp_scrollbar = tk.Scrollbar(tcp_server_text_frame)
         udp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.udp_status_text = tk.Text(
             udp_text_frame, height=20, width=30, font="TkDefaultFont 11",
-            yscrollcommand=udp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
+            yscrollcommand=udp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#E7F2E7"
         )
         self.udp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         udp_scrollbar.config(command=self.udp_status_text.yview)

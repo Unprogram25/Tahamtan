@@ -118,31 +118,30 @@ class SerialManager:
         """Creates all GUI widgets for the Serial tab."""
         # Serial input frame
         input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
-        input_frame.pack(side=tk.TOP, fill=tk.X, pady=2)
+        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
 
         default_font = font.nametofont("TkDefaultFont")
-        default_font.config(size=10) # Change 16 to your desired font size
+        default_font.config(size=10)
 
-        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=0, padx=5, pady=2)
+        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
         self.ports_combobox = ttk.Combobox(input_frame, values=self.scan_ports(), state="readonly", width=11, font=default_font)
-        self.ports_combobox.grid(row=0, column=1, padx=2, pady=2)
+        self.ports_combobox.grid(row=0, column=1, padx=5, pady=5)
         
-        ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=2)
+        ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
         self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="readonly", width=6, font=default_font)
-        self.baud_combobox.grid(row=0, column=3, padx=5, pady=2)
+        self.baud_combobox.grid(row=0, column=3, padx=5, pady=5)
         self.baud_combobox.set(115200)
 
         input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
-        self.connect_button.grid(row=0, column=4, padx=5, pady=2, sticky="ew")
-        
-        
+        self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky="ew")
+                
         refresh_button = ttk.Button(input_frame, text="Refresh", command=self.update_port_list)
-        refresh_button.grid(row=1, column=0, columnspan=4, padx=2, pady=2, sticky="ew")
+        refresh_button.grid(row=1, column=0, columnspan=4, padx=5, pady=2, sticky="ew")
         
         # Status lights frame
         lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
-        lights_frame.grid(row=1, column=4, padx=5, pady=2, sticky=tk.E)
+        lights_frame.grid(row=1, column=4, padx=5, pady=0, sticky=tk.E)
         
         self.disconnected_canvas = tk.Canvas(lights_frame, width=25, height=25)
         self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
@@ -205,7 +204,7 @@ class SerialManager:
                 port_name = self.ports_combobox.get()
                 baud_rate = int(self.baud_combobox.get())
                 if not port_name or "Select" in port_name:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error: No valid port selected.\n", 'error'))
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error : No valid port selected.\n", 'error'))
                     self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
                     return
                 self.ser = serial.Serial(port_name, baud_rate, timeout=0.01)
@@ -214,11 +213,11 @@ class SerialManager:
                 read_thread = threading.Thread(target=self.read_from_port, daemon=True)
                 read_thread.start()
                 self.tab_frame.after(0, lambda: self.update_ui(connected=True, port_name=port_name, baud_rate=baud_rate))
-            except ValueError:
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error: Invalid baud rate. Please select a number.\n", 'error'))
+            except ValueError :
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error : Invalid baud rate. Please select a number.\n", 'error'))
                 self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
             except serial.SerialException as e:
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Error: Could not open the port {port_name}. {e}\n", 'error'))
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Error : Could not open the port {port_name}. {e}\n", 'error'))
                 self.tab_frame.after(0, lambda: self.update_ui(connected=False))
 
     def update_ui(self, connected, port_name=None, baud_rate=None, unexpected_disconnect=False):
@@ -247,7 +246,7 @@ class SerialManager:
         """Reads data from the serial port in a separate thread."""
         while self.ser and self.ser.is_open:
             try:
-                line = self.ser.readline().decode('utf-8').strip()
+                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
                 if line:
                     winsound.Beep(615, 95) # Plays a sound when a message is received.
                     line_cleaned = line.replace('\x1a', '')
@@ -288,7 +287,7 @@ class SerialManager:
                 self.ser.close()
                 self.update_ui(connected=False)
         else:
-            self.status_text.insert(tk.END, "Error: Not connected to a serial port.\n", 'error')
+            self.status_text.insert(tk.END, "Error : Not connected to a serial port.\n", 'error')
             self.status_text.see(tk.END)
 
 class TcpClientManager:
@@ -386,7 +385,7 @@ class TcpClientManager:
                 measured_rtt = (end_time - start_time) * 1000
                 self.ping_queue.put(("Status: Success", f"RTT: {rtt:.2f} ms"))
 
-        except PermissionError:
+        except PermissionError :
             self.ping_queue.put(("Status: Admin Required", "RTT: N/A"))
         except Exception as e:
             self.ping_queue.put((f"Status: Error - {e}", "RTT: N/A"))
@@ -406,7 +405,7 @@ class TcpClientManager:
                     status_text, rtt_text = item
                     self._update_ping_gui(status_text, rtt_text)
         except Exception as e:
-            print("Queue error:", e)
+            print("Queue Error :", e)
         finally:
             self.tab_frame.after(100, self._check_ping_queue)
 
@@ -439,7 +438,7 @@ class TcpClientManager:
     def connect(self, host, port):
         """Attempts to establish a TCP connection."""
         if not host or not port:
-            self.status_text.insert(tk.END, "Error: IP address and port are required.\n", 'error')
+            self.status_text.insert(tk.END, "Error : IP address and port are required.\n", 'error')
             self.status_text.see(tk.END)
             return False
         
@@ -457,7 +456,7 @@ class TcpClientManager:
             self.tab_frame.after(0, lambda: self.update_ui(connected=True))
             return True
         except (socket.error, ValueError) as e:
-            self.status_text.insert(tk.END, f"Error: Could not connect to TCP server. {e}\n", 'error')
+            self.status_text.insert(tk.END, f"Error : Could not connect to TCP server. {e}\n", 'error')
             self.status_text.see(tk.END)
             self.is_connected = False
             self.tab_frame.after(0, lambda: self.update_ui(connected=False))
@@ -496,7 +495,7 @@ class TcpClientManager:
                 winsound.Beep(915, 95)
             except socket.error as e:
                 if self.is_connected:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection error: {e}\n", 'error'))
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error : {e}\n", 'error'))
                     self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
                 self.disconnect()
                 break
@@ -529,7 +528,7 @@ class TcpClientManager:
                 self.disconnect()
             self.status_text.see(tk.END)
         else:
-            self.status_text.insert(tk.END, "Error: TCP client is not connected.\n", 'error')
+            self.status_text.insert(tk.END, "Error : TCP client is not connected.\n", 'error')
             self.status_text.see(tk.END)
         
     def update_ui(self, connected):
@@ -667,7 +666,7 @@ class TcpServerManager:
 
     def send_data(self, base_message):
         if not self.is_running:
-            self.status_text.insert(tk.END, "Error: Server is not running.\n", 'error')
+            self.status_text.insert(tk.END, "Error : Server is not running.\n", 'error')
             self.status_text.see(tk.END)
             return
 
@@ -675,7 +674,7 @@ class TcpServerManager:
         display_eol_var = self.eol_widgets[1]
 
         if not self.client_sockets:
-            self.status_text.insert(tk.END, "Error: No TCP clients are connected.\n", 'error')
+            self.status_text.insert(tk.END, "Error : No TCP clients are connected.\n", 'error')
             self.status_text.see(tk.END)
             return
 
@@ -700,13 +699,13 @@ class TcpServerManager:
                 )
                 try:
                     peer = client_sock.getpeername()
-                except OSError:
+                except OSError :
                     peer = 'Unknown'
                 self.status_text.insert(tk.END, f"Sent to {peer}: {display_message}\n", 'sent')
             except (socket.error, OSError) as e:
                 try:
                     peer = client_sock.getpeername()
-                except OSError:
+                except OSError :
                     peer = 'Unknown'
                 self.status_text.insert(tk.END, f"Error sending to {peer}: {e}\n", 'error')
                 try:
@@ -797,7 +796,7 @@ class UdpManager:
         """Binds the UDP socket to a local port."""
         local_port = self.local_port_entry.get()
         if not local_port:
-            self.status_text.insert(tk.END, "Error: A local port is required to listen.\n", 'error')
+            self.status_text.insert(tk.END, "Error : A local port is required to listen.\n", 'error')
             self.status_text.see(tk.END)
             return
         
@@ -811,7 +810,7 @@ class UdpManager:
             self.read_thread.start()
             self.tab_frame.after(0, lambda: self.update_ui(connected=True))
         except (socket.error, ValueError) as e:
-            self.status_text.insert(tk.END, f"Error: Could not bind to port. {e}\n", 'error')
+            self.status_text.insert(tk.END, f"Error : Could not bind to port. {e}\n", 'error')
             self.status_text.see(tk.END)
             self.is_connected = False
             self.tab_frame.after(0, lambda: self.update_ui(connected=False))
@@ -837,7 +836,7 @@ class UdpManager:
                 winsound.Beep(1115, 95)
             except socket.error as e:
                 if self.is_connected:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket error: {e}\n", 'error'))
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket Error : {e}\n", 'error'))
                 self.disconnect()
                 break
 
@@ -847,12 +846,12 @@ class UdpManager:
         dest_port = self.dest_port_entry.get()
         
         if not self.is_connected:
-            self.status_text.insert(tk.END, "Error: UDP socket is not listening.\n", 'error')
+            self.status_text.insert(tk.END, "Error : UDP socket is not listening.\n", 'error')
             self.status_text.see(tk.END)
             return
         
         if not dest_ip or not dest_port:
-            self.status_text.insert(tk.END, "Error: Destination IP and Port are required for sending.\n", 'error')
+            self.status_text.insert(tk.END, "Error : Destination IP and Port are required for sending.\n", 'error')
             self.status_text.see(tk.END)
             return
 
@@ -1026,13 +1025,13 @@ class App:
 
         # 2. Custom message entry
         self.message_entry = ttk.Entry(send_frame, width=36, font="TkDefaultFont 12")
-        self.message_entry.grid(row=0, column=1, padx=1, pady=1, sticky="nsew")
+        self.message_entry.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
 
         # 3. EOL combobox
         eol_label = ttk.Label(send_frame, text="EOL :", font="TkDefaultFont 9")
-        eol_label.grid(row=0, column=2, padx=1, pady=5, sticky="e")
+        eol_label.grid(row=0, column=2, padx=5, pady=5, sticky="e")
         self.eol_combobox = ttk.Combobox(send_frame, values=EOL_OPTIONS, state="readonly", width=5, font="TkDefaultFont 12")
-        self.eol_combobox.grid(row=0, column=3, padx=1, pady=5)
+        self.eol_combobox.grid(row=0, column=3, padx=5, pady=5)
         
         # Bind the <<NotebookTabChanged>> event to a handler function
         self.tab_control.bind("<<NotebookTabChanged>>", self.on_tab_changed)
@@ -1046,7 +1045,7 @@ class App:
 
         # 5. Send button
         send_button = ttk.Button(send_frame, text="Send", command=self.send_data)
-        send_button.grid(row=1, column=1, columnspan=1, pady=(10,3), sticky="ew")
+        send_button.grid(row=1, column=1, columnspan=1, pady=(5,5), sticky="ew")
 
         # 6. Dynamic config widgets (initially hidden)
         self.conf_key_combobox = None
@@ -1118,7 +1117,7 @@ class App:
             selected_key = self.conf_key_combobox.get()
             custom_value = self.conf_value_entry.get()
             if not selected_key:
-                text_widget.insert(tk.END, "Error: Please select a configuration key.\n", 'error')
+                text_widget.insert(tk.END, "Error : Please select a configuration key.\n", 'error')
                 text_widget.see(tk.END)
                 return
             base_message = f"{preset_command}{selected_key} {custom_value}"
@@ -1127,7 +1126,7 @@ class App:
             base_message = f"{preset_command}{custom_message}"
         
         if not base_message.strip():
-            text_widget.insert(tk.END, "Error: Please enter or select a command to send.\n", 'error')
+            text_widget.insert(tk.END, "Error : Please enter or select a command to send.\n", 'error')
             text_widget.see(tk.END)
             return
             
@@ -1165,7 +1164,7 @@ class App:
                 self.conf_value_entry = ttk.Entry(
                     self.message_entry.master,
                     textvariable=self.conf_value_var,
-                    width=17,
+                    width=19,
                     font="TkDefaultFont 12"
                 )
                 self.conf_value_entry.grid(row=1, column=2, padx=2, pady=5)
@@ -1193,22 +1192,22 @@ if __name__ == "__main__":
         if hasattr(app, "serial_manager") and app.serial_manager.ser and app.serial_manager.ser.is_open:
             app.serial_manager.ser.close()
     except Exception as e:
-        print(f"Serial close error: {e}")
+        print(f"Serial close Error : {e}")
 
     try:
         if app.tcp_client_manager.is_connected:
             app.tcp_client_manager.disconnect()
     except Exception as e:
-        print(f"TCP client disconnect error: {e}")
+        print(f"TCP client disconnect Error : {e}")
 
     try:
         if app.tcp_server_manager.is_running:
             app.tcp_server_manager.stop_server()
     except Exception as e:
-        print(f"TCP server stop error: {e}")
+        print(f"TCP server stop Error : {e}")
 
     try:
         if app.udp_manager.is_connected:
             app.udp_manager.disconnect()
     except Exception as e:
-        print(f"UDP disconnect error: {e}")
+        print(f"UDP disconnect Error : {e}")

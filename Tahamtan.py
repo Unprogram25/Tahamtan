@@ -300,42 +300,43 @@ class TcpClientManager:
         self.read_thread = None
         self.is_connected = False
         self.create_tcp_widgets()
+        self.status_text.tag_configure('connected', foreground='green')
+        self.status_text.tag_configure('disconnected', foreground='red')
+        self.status_text.tag_configure('error', foreground='Maroon')
+        self.status_text.tag_configure('sent', foreground='blue')
+        self.status_text.tag_configure('received', foreground='purple')
 
     def create_tcp_widgets(self):
         """Creates all GUI widgets for the TCP tab."""
-        # TCP input frame
         input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
         input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
         
         default_font = font.nametofont("TkDefaultFont")
-        default_font.config(size=10) # Change 16 to your desired font size
+        default_font.config(size=10)
 
-        ttk.Label(input_frame, text="IP Address:", font=default_font).grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(input_frame, text="IP Address :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
         self.ip_entry = ttk.Entry(input_frame, width=15, font=default_font)
-        self.ip_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.ip_entry.grid(row=0, column=1, padx=0, pady=5)
         self.ip_entry.insert(0, "192.168.1.200")
         
-        ttk.Label(input_frame, text="Port:", font=default_font).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
         self.port_entry = ttk.Entry(input_frame, width=8, font=default_font)
-        self.port_entry.grid(row=0, column=3, padx=5, pady=5)
+        self.port_entry.grid(row=0, column=3, padx=0, pady=5, sticky=tk.W)
         self.port_entry.insert(0, "8585")
         
         input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
         self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky='ew')
         
-        # Add a ping button and a status label in the next row
         self.ping_button = ttk.Button(input_frame, text="Ping", command=self.send_ping)
         self.ping_button.grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
 
         self.ping_status_label = ttk.Label(input_frame, text="RTT : IDLE", font=default_font)
         self.ping_status_label.grid(row=1, column=1, padx=5, pady=2, sticky=tk.W)
-
-         # Ping result label to show the RTT value
+        
         self.ping_result_label = ttk.Label(input_frame, text="RTT : N/A", font=default_font)
         self.ping_result_label.grid(row=1, column=2, padx=5, pady=2, sticky=tk.W)
 
-        # Status lights frame 
         lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
         lights_frame.grid(row=1, column=4, padx=5, pady=0, sticky=tk.E)
         
@@ -353,11 +354,13 @@ class TcpClientManager:
         
         self.update_ui(connected=False)
 
-
     def send_ping(self):
         """
         Initiates an ICMP ping operation on a separate thread to avoid freezing the GUI.
         """
+        if getattr(self, "ping_in_process", False):
+            return
+        self.ping_in_process = True
         self.ping_button.config(state=tk.DISABLED)
         self.ping_queue = Queue()
         ping_thread = threading.Thread(target=self._run_ping_logic)
@@ -385,7 +388,7 @@ class TcpClientManager:
                 measured_rtt = (end_time - start_time) * 1000
                 self.ping_queue.put(("Status: Success", f"RTT: {rtt:.2f} ms"))
 
-        except PermissionError :
+        except PermissionError:
             self.ping_queue.put(("Status: Admin Required", "RTT: N/A"))
         except Exception as e:
             self.ping_queue.put((f"Status: Error - {e}", "RTT: N/A"))
@@ -401,11 +404,12 @@ class TcpClientManager:
                 item = self.ping_queue.get_nowait()
                 if item == "ENABLE_BUTTON":
                     self.ping_button.config(state=tk.NORMAL)
+                    self.ping_in_process = False
                 else:
                     status_text, rtt_text = item
                     self._update_ping_gui(status_text, rtt_text)
         except Exception as e:
-            print("Queue Error :", e)
+            print("Queue Error:", e)
         finally:
             self.tab_frame.after(100, self._check_ping_queue)
 
@@ -413,10 +417,8 @@ class TcpClientManager:
         """
         Safely updates GUI elements from a different thread.
         """
-        self.ping_status_label.config(text=status_text, font=STATUS_FONT, width= 15)
+        self.ping_status_label.config(text=status_text, font=STATUS_FONT, width=15)
         self.ping_result_label.config(text=rtt_text, font=RTT_FONT, width=8)
-
-
 
     def toggle_connection_threaded(self):
         """Starts the TCP connection/disconnection process in a separate thread."""
@@ -433,6 +435,10 @@ class TcpClientManager:
         else:
             host = self.ip_entry.get()
             port = self.port_entry.get()
+            if not host or not port.isdigit():
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Error: Invalid IP or Port.\n", 'error'))
+                self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
+                return
             self.connect(host, port)
 
     def connect(self, host, port):
@@ -443,7 +449,16 @@ class TcpClientManager:
             return False
         
         try:
+            if not port.isdigit():
+                self.status_text.insert(tk.END, "Error : Port must be a number.\n", 'error')
+                return False
             self.port = int(port)
+            if self.sock:
+                try:
+                    self.sock.close()
+                except:
+                    pass
+                self.sock = None
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.settimeout(3)
             self.sock.connect((host, self.port))
@@ -464,6 +479,10 @@ class TcpClientManager:
 
     def disconnect(self):
         """Closes the TCP connection safely."""
+        # Use a guard to ensure disconnection logic runs only once
+        if not self.is_connected:
+            return
+
         self.is_connected = False
         try:
             if self.sock:
@@ -472,64 +491,68 @@ class TcpClientManager:
             print(f"Error closing socket: {e}")
         self.sock = None
 
-        # Schedule the UI update on the main thread
-        self.tab_frame.after(0, lambda: self.update_ui(connected=False))
-        
-        # Check if the text widget still exists before inserting text.
         if self.status_text and self.status_text.winfo_exists():
             self.status_text.insert(tk.END, "Disconnected from TCP server.\n", 'disconnected')
-            self.status_text.see(tk.END)    
+            self.status_text.see(tk.END)
+        
+        self.tab_frame.after(0, lambda: self.update_ui(connected=False))
 
     def read_from_socket(self):
         """Reads data from the TCP socket in a separate thread."""
-        while self.is_connected:
-            try:
+        try:
+            while self.is_connected:
                 data = self.sock.recv(1024)
                 if not data:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Server closed the connection gracefully.\n", 'error'))
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Server closed the connection gracefully.\n", 'info'))
                     self.disconnect()
                     break
-                decoded_data = data.decode('utf-8')
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Received TCP: {decoded_data}\n", 'received'))
+                decoded_data = data.decode('utf-8', errors='ignore')
+                timestamp = time.strftime("%H:%M:%S")
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"[{timestamp}] Received TCP: {decoded_data}\n", 'received'))
                 self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
                 winsound.Beep(915, 95)
-            except socket.error as e:
-                if self.is_connected:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error : {e}\n", 'error'))
-                    self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                self.disconnect()
-                break
+        except socket.error as e:
+            if self.is_connected:
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error: {e}\n", 'error'))
+                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+            self.disconnect()
 
     def send_data(self, base_message):
         """Sends data through the TCP socket."""
-        eol_option = self.eol_widgets[0].get()
-        display_eol_var = self.eol_widgets[1]
-        
-        if self.is_connected:
-            if eol_option == "\\r\\n":
-                final_message = base_message + '\r\n'
-            elif eol_option == "\\n":
-                final_message = base_message + '\n'
-            elif eol_option == "\\r":
-                final_message = base_message + '\r'
-            else:
-                final_message = base_message
-            
-            try:
-                self.sock.sendall(final_message.encode('utf-8'))
-                if display_eol_var.get():
-                    display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
-                else:
-                    display_message = base_message
-                self.status_text.insert(tk.END, f"Sent TCP: {display_message}\n", 'sent')
-            except socket.error as e:
-                self.status_text.insert(tk.END, f"Error sending data: {e}\n", 'error')
-                # A socket error during send also means the connection is lost.
-                self.disconnect()
-            self.status_text.see(tk.END)
-        else:
+        if not self.is_connected:
             self.status_text.insert(tk.END, "Error : TCP client is not connected.\n", 'error')
             self.status_text.see(tk.END)
+            return
+
+        if not base_message.strip():
+            self.status_text.insert(tk.END, "Error : Cannot send empty message.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+        
+        eol_option = self.eol_widgets[0].get()
+        display_eol_var = self.eol_widgets[1]
+
+        final_message = base_message
+        if eol_option == "\\r\\n":
+            final_message += '\r\n'
+        elif eol_option == "\\n":
+            final_message += '\n'
+        elif eol_option == "\\r":
+            final_message += '\r'
+        
+        try:
+            encoded_message = final_message.encode('utf-8', errors='replace')
+            self.sock.sendall(encoded_message)
+            
+            display_message = (
+                final_message.replace('\r', '\\r').replace('\n', '\\n')
+                if display_eol_var.get() else base_message
+            )
+            self.status_text.insert(tk.END, f"Sent TCP : {display_message}\n", 'sent')
+        except socket.error as e:
+            self.status_text.insert(tk.END, f"Error sending data: {e}\n", 'error')
+            self.disconnect()
+        self.status_text.see(tk.END)
         
     def update_ui(self, connected):
         """Updates the UI elements after a connection attempt for the given protocol."""
@@ -546,19 +569,25 @@ class TcpClientManager:
         self.status_text.see(tk.END)
 
 class TcpServerManager:
+    """Manages a TCP server and its corresponding GUI elements."""
     def __init__(self, tab_frame, status_text_widget, eol_widgets):
         self.tab_frame = tab_frame
         self.status_text = status_text_widget
         self.eol_widgets = eol_widgets
         self.server_socket = None
-        self.client_threads = []
+        self.client_sockets = {}
         self.is_running = False
         self.port_entry = None
         self.start_button = None
-        self.client_sockets = []
         self.create_server_widgets()
 
+        self.status_text.tag_configure('connected', foreground='green')
+        self.status_text.tag_configure('disconnected', foreground='red')
+        self.status_text.tag_configure('error', foreground='Maroon')
+        self.status_text.tag_configure('info', foreground='black')
+
     def create_server_widgets(self):
+        """Creates all GUI widgets for the TCP server tab."""
         input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
         input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
 
@@ -570,160 +599,227 @@ class TcpServerManager:
         self.start_button = ttk.Button(input_frame, text="Listen", command=self.toggle_server_threaded)
         self.start_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
         input_frame.columnconfigure(2, weight=1)
+        
+        # Status lights frame 
+        lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
+        lights_frame.grid(row=0, column=3, padx=5, pady=0, sticky=tk.E)
+        
+        self.disconnected_canvas = tk.Canvas(lights_frame, width=25, height=25)
+        self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
+        create_circle(self.disconnected_canvas, 12, 12, 10, "red")
+        
+        self.connecting_canvas = tk.Canvas(lights_frame, width=25, height=25)
+        self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=0)
+        create_circle(self.connecting_canvas, 12, 12, 10, "gray")
+        
+        self.connected_canvas = tk.Canvas(lights_frame, width=25, height=25)
+        self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
+        create_circle(self.connected_canvas, 12, 12, 10, "gray")
 
     def toggle_server_threaded(self):
+        """Starts or stops the server in a separate thread."""
         thread = threading.Thread(target=self.toggle_server, daemon=True)
+        self.status_text.insert(tk.END, "Starting TCP server...\n", 'info')
+        self.status_text.see(tk.END)
         thread.start()
 
     def toggle_server(self):
+        """Handles the server's start/stop logic."""
         if self.is_running:
             self.stop_server()
         else:
+            self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connecting"))
             self.start_server()
 
     def start_server(self):
+        """Attempts to start the TCP server."""
         try:
-            port = int(self.port_entry.get())
+            port_str = self.port_entry.get()
+            if not port_str.isdigit():
+                self._log("Error: Port must be a number.", 'error')
+                return
+            port = int(port_str)
+            if not (1024 <= port <= 65535):
+                self._log("Error: Port must be between 1024 and 65535.", 'error')
+                return
+            
+            # Create and configure the server socket
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
-
+            
             self.server_socket.bind(('', port))
             self.server_socket.listen(5)
             self.is_running = True
-            self._log(f"TCP Server started on port {port}", 'connected')
+            
+            self.tab_frame.after(0, lambda: self._log(f"TCP Server started on port {port}", 'connected'))
             threading.Thread(target=self.accept_clients, daemon=True).start()
-            self.start_button.config(text="Stop Server")
-            self.port_entry.config(state="disabled")
+            self.tab_frame.after(0, lambda: self.start_button.config(text="Stop Server"))
+            self.tab_frame.after(0, lambda: self.port_entry.config(state="disabled"))
+            self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "connected"))
         except Exception as e:
-            self._log(f"Error starting server: {e}", 'error')
+            self.tab_frame.after(0, lambda: self._log(f"Error starting server: {e}", 'error'))
+            self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
 
     def stop_server(self):
-        self.is_running = False
-        try:
-            for client_sock in self.client_sockets:
-                try:
-                    client_sock.shutdown(socket.SHUT_RDWR)
-                except Exception:
-                    pass
-                client_sock.close()
-            self.client_sockets.clear()
+        """Closes all client connections and the server socket."""
+        if not self.is_running:
+            return
 
-            if self.server_socket:
+        self.is_running = False
+        disconnected_count = len(self.client_sockets)
+
+        # Iterate over a copy of the dictionary and gracefully shut down sockets
+        for client_sock in list(self.client_sockets.keys()):
+            try:
+                # Force the socket to stop receiving data, which will cause recv() to return 0 bytes
+                client_sock.shutdown(socket.SHUT_RD)
+            except Exception:
+                pass
+        
+        # After signaling all threads to stop, clear the client sockets
+        self.client_sockets.clear()
+
+        # Close the server socket
+        if self.server_socket:
+            try:
                 self.server_socket.close()
                 self.server_socket = None
-                self.port_entry.config(state="enabled")
-
-            self._log("TCP Server stopped", 'disconnected')
-        except Exception as e:
-            self._log(f"Error stopping server: {e}", 'error')
-        self.start_button.config(text="Listen")
-        self.port_entry.config(state="enabled")
+            except Exception:
+                pass
+        
+        self.tab_frame.after(0, lambda: self.start_button.config(text="Listen"))
+        self.tab_frame.after(0, lambda: self.port_entry.config(state="enabled"))
+        self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
+        
+        timestamp = time.strftime("%H:%M:%S")
+        self.tab_frame.after(0, lambda: self._log(f"[{timestamp}] TCP Server stopped", 'disconnected'))
+        self.tab_frame.after(0, lambda: self._log(f"{disconnected_count} clients disconnected.", 'info'))
 
     def accept_clients(self):
-        while self.is_running and self.server_socket:
-            try:
-                client_socket, addr = self.server_socket.accept()
-                client_socket.settimeout(1.0) 
-                self.client_sockets.append(client_socket)
-                self._log(f"Client connected from {addr}", 'connected')
-                thread = threading.Thread(target=self.handle_client, args=(client_socket, addr), daemon=True)
-                thread.start()
-                self.client_threads.append(thread)
-            except OSError as e:
-                if not self.is_running:
-                    break
-                self._log(f"Error accepting client: {e}", 'error')
+        """Accepts incoming client connections in a separate thread."""
+        try:
+            while self.is_running and self.server_socket:
+                try:
+                    client_socket, addr = self.server_socket.accept()
+                    client_socket.settimeout(1.0)
+                    
+                    # Store client socket and thread together for management
+                    thread = threading.Thread(
+                        target=self.handle_client,
+                        args=(client_socket, addr),
+                        daemon=True
+                    )
+                    self.client_sockets[client_socket] = thread
+                    thread.start()
+
+                    self.tab_frame.after(0, lambda: self._log(f"Client connected from {addr}", 'connected'))
+
+                except OSError as e:
+                    if not self.is_running:
+                        break
+                    self.tab_frame.after(0, lambda: self._log(f"Error accepting client: {e}", 'error'))
+                
+        except Exception as e:
+            self.tab_frame.after(0, lambda: self._log(f"Fatal error in accept_clients: {e}", 'error'))
 
     def handle_client(self, client_socket, addr):
+        """Handles data reception from a single client."""
         try:
-            while self.is_running:
-                if client_socket.fileno() == -1:
-                    break
+            while self.is_running and client_socket.fileno() != -1:
                 try:
                     data = client_socket.recv(1024)
                     if not data:
+                        # Gracefully break the loop when the client closes the connection
                         break
-                    self._log(f"Received from {addr}: {data.decode()}", 'info')
+                    
+                    timestamp = time.strftime("%H:%M:%S")
+                    self.tab_frame.after(0, lambda addr=addr, data=data: self._log(f"[{timestamp}] Received from {addr}: {data.decode(errors='replace')}", 'info'))
                     winsound.Beep(1415, 95)
-                    client_socket.sendall(data)
+
                 except socket.timeout:
                     continue
-                # except (ConnectionResetError, OSError) as e:
-                #     self._log(f"Connection error with {addr}: {e}", 'error')
-                #     break
+                except (ConnectionResetError, OSError) as e:
+                    # Capture the exception 'e' correctly and break the loop on error
+                    self.tab_frame.after(0, lambda e=e, addr=addr: self._log(f"Connection error with {addr}: {e}", 'error'))
+                    break
         finally:
+            self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected", 'disconnected'))
             try:
+                # Remove the socket from the dict and close it
+                if client_socket in self.client_sockets:
+                    del self.client_sockets[client_socket]
                 client_socket.close()
             except Exception:
                 pass
-            if client_socket in self.client_sockets:
-                self.client_sockets.remove(client_socket)
-            self._log(f"Client {addr} disconnected", 'disconnected')
 
     def send_data(self, base_message):
+        """Sends data to all connected clients."""
         if not self.is_running:
-            self.status_text.insert(tk.END, "Error : Server is not running.\n", 'error')
-            self.status_text.see(tk.END)
+            self.tab_frame.after(0, lambda: self._log("Error: Server is not running.", 'error'))
+            return
+
+        if not self.client_sockets:
+            self.tab_frame.after(0, lambda: self._log("Error: No TCP clients are connected.", 'error'))
+            return
+        
+        if not base_message.strip():
+            self.tab_frame.after(0, lambda: self._log("Error: Cannot send empty message.", 'error'))
             return
 
         eol_option = self.eol_widgets[0].get()
         display_eol_var = self.eol_widgets[1]
 
-        if not self.client_sockets:
-            self.status_text.insert(tk.END, "Error : No TCP clients are connected.\n", 'error')
-            self.status_text.see(tk.END)
-            return
-
+        final_message = base_message
         if eol_option == "\\r\\n":
-            final_message = base_message + '\r\n'
+            final_message += '\r\n'
         elif eol_option == "\\n":
-            final_message = base_message + '\n'
+            final_message += '\n'
         elif eol_option == "\\r":
-            final_message = base_message + '\r'
-        else:
-            final_message = base_message
+            final_message += '\r'
 
-        for client_sock in list(self.client_sockets):
-            if client_sock.fileno() == -1:
-                self.client_sockets.remove(client_sock)
-                continue
+        # Iterate over a copy of the dictionary to avoid errors if clients disconnect during the loop
+        for client_sock, thread in list(self.client_sockets.items()):
             try:
-                client_sock.sendall(final_message.encode('utf-8'))
+                if client_sock.fileno() == -1:
+                    continue
+                
+                client_sock.sendall(final_message.encode('utf-8', errors='replace'))
                 display_message = (
                     final_message.replace('\r', '\\r').replace('\n', '\\n')
                     if display_eol_var.get() else base_message
                 )
+                
+                peer = 'Unknown'
                 try:
                     peer = client_sock.getpeername()
-                except OSError :
-                    peer = 'Unknown'
-                self.status_text.insert(tk.END, f"Sent to {peer}: {display_message}\n", 'sent')
+                except OSError:
+                    pass
+                
+                self.tab_frame.after(0, lambda display_message=display_message, peer=peer: self._log(f"[{time.strftime('%H:%M:%S')}] Sent to {peer} : {display_message}", 'sent'))
             except (socket.error, OSError) as e:
+                peer = 'Unknown'
                 try:
                     peer = client_sock.getpeername()
-                except OSError :
-                    peer = 'Unknown'
-                self.status_text.insert(tk.END, f"Error sending to {peer}: {e}\n", 'error')
+                except OSError:
+                    pass
+                self.tab_frame.after(0, lambda e=e, peer=peer: self._log(f"Error sending to {peer} : {e}", 'error'))
                 try:
                     client_sock.close()
                 except Exception:
                     pass
                 if client_sock in self.client_sockets:
-                    self.client_sockets.remove(client_sock)
-            self.status_text.see(tk.END)
+                    del self.client_sockets[client_sock]
+        self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+
 
     def _log(self, message, tag='info'):
-        self.status_text.tag_configure('connected', foreground='green')
-        self.status_text.tag_configure('disconnected', foreground='red')
-        self.status_text.tag_configure('error', foreground='Maroon')
-        self.status_text.tag_configure('info', foreground='black')
+        """Helper method to safely log messages to the GUI."""
         self.status_text.insert(tk.END, f"{message}\n", tag)
         self.status_text.see(tk.END)
-
 class UdpManager:
     """Manages all UDP communication and its corresponding GUI elements."""
     def __init__(self, tab_frame, status_text_widget, eol_widgets):
@@ -902,7 +998,7 @@ class App:
         self.style.configure("TCombobox", font="TkDefaultFont 10")
         self.style.configure("TButton", font="TkDefaultFont 10")
         self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 11))
-
+        self.style.configure('BigSend.TButton', font=("TkDefaultFont", 12)) 
         # Initialize tab variables to None to prevent errors before setup
         self.serial_tab = None
         self.tcp_client_tab = None
@@ -937,7 +1033,7 @@ class App:
         # This will be passed to the respective Manager class
         # Serial Status/Output Text Box
         serial_text_with_scroll_frame = tk.Frame(self.serial_tab)
-        serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
+        serial_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
         serial_scrollbar = tk.Scrollbar(serial_text_with_scroll_frame)
         serial_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.serial_status_text = tk.Text(
@@ -964,12 +1060,12 @@ class App:
         tcp_client_scrollbar.config(command=self.tcp_client_status_text.yview)
 
         # TCP Server Status/Output Text Box
-        tcp_server_text_frame = tk.Frame(self.tcp_server_tab)
-        tcp_server_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
-        tcp_server_scrollbar = tk.Scrollbar(tcp_server_text_frame)
+        tcp_server_text_with_scroll_frame = tk.Frame(self.tcp_server_tab)
+        tcp_server_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
+        tcp_server_scrollbar = tk.Scrollbar(tcp_server_text_with_scroll_frame)
         tcp_server_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tcp_server_status_text = tk.Text(
-            tcp_server_text_frame, height=20, width=30, font="TkDefaultFont 11",
+            tcp_server_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11",
             yscrollcommand=tcp_server_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#F8F8FA"
         )
         self.tcp_server_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -978,12 +1074,12 @@ class App:
         tcp_server_scrollbar.config(command=self.tcp_server_status_text.yview)
 
         # UDP Status/Output Text Box
-        udp_text_frame = tk.Frame(self.udp_tab)
-        udp_text_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=2, fill=tk.BOTH, expand=True)
-        udp_scrollbar = tk.Scrollbar(tcp_server_text_frame)
+        udp_text_with_scroll_frame = tk.Frame(self.udp_tab)
+        udp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
+        udp_scrollbar = tk.Scrollbar(udp_text_with_scroll_frame)
         udp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.udp_status_text = tk.Text(
-            udp_text_frame, height=20, width=30, font="TkDefaultFont 11",
+            udp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11",
             yscrollcommand=udp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#E7F2E7"
         )
         self.udp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -1044,7 +1140,7 @@ class App:
         self.display_eol_checkbutton.grid(row=1, column=3, columnspan=2, padx=5, pady=5)
 
         # 5. Send button
-        send_button = ttk.Button(send_frame, text="Send", command=self.send_data)
+        send_button = ttk.Button(send_frame, text="Send", command=self.send_data, style='BigSend.TButton')
         send_button.grid(row=1, column=1, columnspan=1, pady=(5,5), sticky="ew")
 
         # 6. Dynamic config widgets (initially hidden)
@@ -1185,29 +1281,36 @@ class App:
 if __name__ == "__main__":
     window = tk.Tk()
     app = App(window)
+
+    def on_closing():
+        # This function performs all cleanup operations in a centralized manner.
+        # It must be called before the window is destroyed.
+        try:
+            # Check and close the serial port
+            if hasattr(app, "serial_manager") and app.serial_manager.ser and app.serial_manager.ser.is_open:
+                app.serial_manager.ser.close()
+
+            # Check and disconnect the TCP Client
+            if hasattr(app, "tcp_client_manager") and app.tcp_client_manager.is_connected:
+                app.tcp_client_manager.disconnect()
+
+            # Check and stop the TCP Server
+            if hasattr(app, "tcp_server_manager") and app.tcp_server_manager.is_running:
+                app.tcp_server_manager.stop_server()
+            
+            # Check and disconnect the UDP Client
+            if hasattr(app, "udp_manager") and app.udp_manager.is_connected:
+                app.udp_manager.disconnect()
+
+        except Exception as e:
+            # This block handles any potential errors during the cleanup process.
+            print(f"Error during graceful shutdown: {e}")
+        
+        # After all resources are freed, close the main window.
+        window.destroy()
+
+    # Bind the 'on_closing' function to the window close event.
+    window.protocol("WM_DELETE_WINDOW", on_closing)
+
+    # Start the application's main loop.
     window.mainloop()
-    
-    # This part will run after the window is closed
-    try:
-        if hasattr(app, "serial_manager") and app.serial_manager.ser and app.serial_manager.ser.is_open:
-            app.serial_manager.ser.close()
-    except Exception as e:
-        print(f"Serial close Error : {e}")
-
-    try:
-        if app.tcp_client_manager.is_connected:
-            app.tcp_client_manager.disconnect()
-    except Exception as e:
-        print(f"TCP client disconnect Error : {e}")
-
-    try:
-        if app.tcp_server_manager.is_running:
-            app.tcp_server_manager.stop_server()
-    except Exception as e:
-        print(f"TCP server stop Error : {e}")
-
-    try:
-        if app.udp_manager.is_connected:
-            app.udp_manager.disconnect()
-    except Exception as e:
-        print(f"UDP disconnect Error : {e}")

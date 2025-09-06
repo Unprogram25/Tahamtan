@@ -291,7 +291,7 @@ class SerialManager:
             self.status_text.insert(tk.END, "Error: Not connected to a serial port.\n", 'error')
             self.status_text.see(tk.END)
 
-class TcpManager:
+class TcpClientManager:
     """Manages all TCP communication and its corresponding GUI elements."""
     def __init__(self, tab_frame, status_text_widget, eol_widgets):
         self.tab_frame = tab_frame
@@ -899,15 +899,14 @@ class App:
         self.window.geometry("515x615")
         self.window.configure(bg="#F0F0F0")
         # window.resizable(False, False)
-
         self.style = ttk.Style()
         self.style.configure("TCombobox", font="TkDefaultFont 10")
         self.style.configure("TButton", font="TkDefaultFont 10")
-        self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 10))
+        self.style.configure("TNotebook.Tab", font=("TkDefaultFont", 11))
 
         # Initialize tab variables to None to prevent errors before setup
         self.serial_tab = None
-        self.tcp_tab = None
+        self.tcp_client_tab = None
         self.tcp_server_tab = None
         self.udp_tab = None
         self.tab_control = None
@@ -917,7 +916,7 @@ class App:
     def setup_gui(self):
         """Sets up the main GUI components including the notebook and tabs."""
         main_frame = tk.Frame(self.window, bg="#F0F0F0")
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=3, pady=5)
               
         self.tab_control = ttk.Notebook(main_frame)
         self.tab_control.pack(fill=tk.BOTH, expand=True)
@@ -926,8 +925,8 @@ class App:
         self.serial_tab = ttk.Frame(self.tab_control)
         self.tab_control.add(self.serial_tab, text="Serial")
 
-        self.tcp_tab = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tcp_tab, text="TCP Client")
+        self.tcp_client_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.tcp_client_tab, text="TCP Client")
 
         self.tcp_server_tab = ttk.Frame(self.tab_control)
         self.tab_control.add(self.tcp_server_tab, text="TCP Server")
@@ -947,19 +946,23 @@ class App:
             yscrollcommand=serial_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False
         )
         self.serial_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.serial_status_text.bind("<Key>", lambda e: "break")
+        self.serial_status_text.bind("<Button-1>", lambda e: "break")
         serial_scrollbar.config(command=self.serial_status_text.yview)
 
-        # TCP Status/Output Text Box
-        tcp_text_with_scroll_frame = tk.Frame(self.tcp_tab)
-        tcp_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
-        tcp_scrollbar = tk.Scrollbar(tcp_text_with_scroll_frame)
-        tcp_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tcp_status_text = tk.Text(
-            tcp_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11", 
-            yscrollcommand=tcp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#FFF9F9"
+        # TCP Client Status/Output Text Box
+        tcp_client_text_with_scroll_frame = tk.Frame(self.tcp_client_tab)
+        tcp_client_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 1), pady=5, fill=tk.BOTH, expand=True)
+        tcp_client_scrollbar = tk.Scrollbar(tcp_client_text_with_scroll_frame)
+        tcp_client_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tcp_client_status_text = tk.Text(
+            tcp_client_text_with_scroll_frame, height=20, width=30, font="TkDefaultFont 11", 
+            yscrollcommand=tcp_client_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#FFF9F9"
         )
-        self.tcp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tcp_scrollbar.config(command=self.tcp_status_text.yview)
+        self.tcp_client_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tcp_client_status_text.bind("<Key>", lambda e: "break")
+        self.tcp_client_status_text.bind("<Button-1>", lambda e: "break")
+        tcp_client_scrollbar.config(command=self.tcp_client_status_text.yview)
 
         # TCP Server Status/Output Text Box
         tcp_server_text_frame = tk.Frame(self.tcp_server_tab)
@@ -971,6 +974,8 @@ class App:
             yscrollcommand=tcp_server_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#F8F8FA"
         )
         self.tcp_server_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.tcp_server_status_text.bind("<Key>", lambda e: "break")
+        self.tcp_server_status_text.bind("<Button-1>", lambda e: "break")
         tcp_server_scrollbar.config(command=self.tcp_server_status_text.yview)
 
         # UDP Status/Output Text Box
@@ -983,6 +988,8 @@ class App:
             yscrollcommand=udp_scrollbar.set, padx=5, wrap=tk.WORD, takefocus=False, bg="#E7F2E7"
         )
         self.udp_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.udp_status_text.bind("<Key>", lambda e: "break")
+        self.udp_status_text.bind("<Button-1>", lambda e: "break")
         udp_scrollbar.config(command=self.udp_status_text.yview)
 
         # Configure the 'sent', 'received' etc. tags
@@ -991,10 +998,10 @@ class App:
         self.serial_status_text.tag_configure('error', foreground='red')
         self.serial_status_text.tag_configure('warning', foreground='orange')
 
-        self.tcp_status_text.tag_configure('sent', foreground='blue')
-        self.tcp_status_text.tag_configure('received', foreground='green')
-        self.tcp_status_text.tag_configure('error', foreground='red')
-        self.tcp_status_text.tag_configure('warning', foreground='orange')
+        self.tcp_client_status_text.tag_configure('sent', foreground='blue')
+        self.tcp_client_status_text.tag_configure('received', foreground='green')
+        self.tcp_client_status_text.tag_configure('error', foreground='red')
+        self.tcp_client_status_text.tag_configure('warning', foreground='orange')
 
         self.tcp_server_status_text.tag_configure('sent', foreground='blue')
         self.tcp_server_status_text.tag_configure('received', foreground='green')
@@ -1023,7 +1030,7 @@ class App:
 
         # 3. EOL combobox
         eol_label = ttk.Label(send_frame, text="EOL :", font="TkDefaultFont 9")
-        eol_label.grid(row=0, column=2, padx=1, pady=5)
+        eol_label.grid(row=0, column=2, padx=1, pady=5, sticky="e")
         self.eol_combobox = ttk.Combobox(send_frame, values=EOL_OPTIONS, state="readonly", width=5, font="TkDefaultFont 12")
         self.eol_combobox.grid(row=0, column=3, padx=1, pady=5)
         
@@ -1047,7 +1054,7 @@ class App:
         
         # --- Instantiate the managers after the Text widgets are created ---
         self.serial_manager = SerialManager(self.serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var))
-        self.tcp_manager = TcpManager(self.tcp_tab, self.tcp_status_text, (self.eol_combobox, self.display_eol_var))
+        self.tcp_client_manager = TcpClientManager(self.tcp_client_tab, self.tcp_client_status_text, (self.eol_combobox, self.display_eol_var))
         self.tcp_server_manager = TcpServerManager(self.tcp_server_tab, self.tcp_server_status_text, (self.eol_combobox, self.display_eol_var))
         self.udp_manager = UdpManager(self.udp_tab, self.udp_status_text, (self.eol_combobox, self.display_eol_var)) 
 
@@ -1062,39 +1069,27 @@ class App:
         """
         Handles the tab change event to set the correct EOL value.
         """
-        # Get the index of the currently selected tab
-        current_tab_index = self.tab_control.index(self.tab_control.select())
-        
-        # Check if the active tab is the Serial tab (index 0)
-        if current_tab_index == 0:
-            # Set the EOL to \r\n for the Serial tab
+        current_tab_text = self.tab_control.tab(self.tab_control.select(), "text")
+
+        if current_tab_text == "Serial":
             self.eol_combobox.set("\\r\\n")
-        
-        # If the active tab is the TCP tab (index 1)
-        elif current_tab_index == 1:
-            # Clear the EOL combobox for the TCP tab
-            self.eol_combobox.set("")
-        elif current_tab_index == 2:  # TCP Server tab
+        else:
             self.eol_combobox.set("")
 
-
-    def clear_status_box(self, event):
+    def clear_status_box(self, event = None):
         """Clears all content from the status_box widget of the current tab."""
         current_tab = self.tab_control.tab(self.tab_control.select(), "text")
         if current_tab == "Serial":
             text_widget = self.serial_status_text
         elif current_tab == "TCP Client":
-            text_widget = self.tcp_status_text
+            text_widget = self.tcp_client_status_text
         elif current_tab == "TCP Server":
             text_widget = self.tcp_server_status_text
         elif current_tab == "UDP":
             text_widget = self.udp_status_text
         else:
             return
-            
-        text_widget.config(state=tk.NORMAL)
         text_widget.delete('1.0', 'end')
-        # text_widget.config(state=tk.DISABLED)
 
     def send_data(self):
         """Sends data from the input widgets based on the current active tab."""
@@ -1105,8 +1100,8 @@ class App:
             text_widget = self.serial_status_text
             manager = self.serial_manager
         elif current_tab_text == "TCP Client":
-            text_widget = self.tcp_status_text
-            manager = self.tcp_manager
+            text_widget = self.tcp_client_status_text
+            manager = self.tcp_client_manager
         elif current_tab_text == "TCP Server":
             text_widget = self.tcp_server_status_text
             manager = self.tcp_server_manager
@@ -1141,36 +1136,52 @@ class App:
     def handle_preset_selection(self, event):
         """Dynamically changes the message entry widget based on the selected command."""
         selected_command = self.preset_combobox.get()
-        
+
         self.message_entry.grid_forget()
-        if self.conf_key_combobox:
+        if self.conf_key_combobox is not None:
             self.conf_key_combobox.grid_forget()
-        if self.conf_value_entry:
+            self.conf_key_combobox.destroy()
+            self.conf_key_combobox = None
+        if self.conf_value_entry is not None:
             self.conf_value_entry.grid_forget()
-        
+            self.conf_value_entry.destroy()
+            self.conf_value_entry = None
+
+        self.conf_key_var = tk.StringVar()
+        self.conf_value_var = tk.StringVar()
+
         if selected_command == "/conf ":
-            self.conf_key_combobox = ttk.Combobox(self.message_entry.master, values=list(CONFIG_OPTIONS.keys()), state="readonly", width=20, font="TkDefaultFont 12")
-            self.conf_key_combobox.grid(row=0, column=1, padx=2, pady=5, sticky="ew")
-            self.conf_key_combobox.bind("<<ComboboxSelected>>", self.update_conf_value)
-            
-            self.conf_value_entry = ttk.Entry(self.message_entry.master, width=25, font="TkDefaultFont 12")
-            self.conf_value_entry.grid(row=0, column=2, padx=2, pady=5, sticky="ew")
+            if CONFIG_OPTIONS:
+                self.conf_key_combobox = ttk.Combobox(
+                    self.message_entry.master,
+                    textvariable=self.conf_key_var,
+                    values=list(CONFIG_OPTIONS.keys()),
+                    state="readonly",
+                    font="TkDefaultFont 12"
+                )
+                self.conf_key_combobox.grid(row=0, column=1, padx=2, pady=5, sticky="ew")
+                self.conf_key_combobox.bind("<<ComboboxSelected>>", self.update_conf_value)
+
+                self.conf_value_entry = ttk.Entry(
+                    self.message_entry.master,
+                    textvariable=self.conf_value_var,
+                    width=17,
+                    font="TkDefaultFont 12"
+                )
+                self.conf_value_entry.grid(row=1, column=2, padx=2, pady=5)
         elif selected_command == "/reset":
             self.message_entry.delete(0, tk.END)
             self.message_entry.grid(row=0, column=1, padx=5, pady=5)
             self.message_entry.config(state="disabled")
-            
         else:
             self.message_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
             self.message_entry.config(state="normal")
 
     def update_conf_value(self, event):
         """Updates the value entry with the default value for the selected key."""
-        selected_key = self.conf_key_combobox.get()
-        selected_key_clean = selected_key.strip()
-        if selected_key_clean in CONFIG_OPTIONS:
-            self.conf_value_entry.delete(0, tk.END)
-            self.conf_value_entry.insert(0, CONFIG_OPTIONS[selected_key_clean])
+        selected_key = self.conf_key_var.get().strip()
+        if CONFIG_OPTIONS and selected_key in CONFIG_OPTIONS:
+            self.conf_value_var.set(CONFIG_OPTIONS[selected_key])
 
 if __name__ == "__main__":
     window = tk.Tk()
@@ -1178,11 +1189,26 @@ if __name__ == "__main__":
     window.mainloop()
     
     # This part will run after the window is closed
-    if app.serial_manager.ser and app.serial_manager.ser.is_open:
-        app.serial_manager.ser.close()
-    if app.tcp_manager.is_connected:
-        app.tcp_manager.disconnect()
-    if app.tcp_server_manager.is_running:
-        app.tcp_manager.disconnect()
-    if app.udp_manager.is_connected:
-        app.tcp_manager.disconnect()
+    try:
+        if hasattr(app, "serial_manager") and app.serial_manager.ser and app.serial_manager.ser.is_open:
+            app.serial_manager.ser.close()
+    except Exception as e:
+        print(f"Serial close error: {e}")
+
+    try:
+        if app.tcp_client_manager.is_connected:
+            app.tcp_client_manager.disconnect()
+    except Exception as e:
+        print(f"TCP client disconnect error: {e}")
+
+    try:
+        if app.tcp_server_manager.is_running:
+            app.tcp_server_manager.stop_server()
+    except Exception as e:
+        print(f"TCP server stop error: {e}")
+
+    try:
+        if app.udp_manager.is_connected:
+            app.udp_manager.disconnect()
+    except Exception as e:
+        print(f"UDP disconnect error: {e}")

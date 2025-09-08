@@ -38,7 +38,9 @@ After installing the dependencies, simply execute the main script:
 Bash
 
 python main.py
+
 Usage 🖥️
+
 Serial Tab
 Port: Select your device's serial port from the dropdown. Use the Refresh button to update the list of available ports.
 

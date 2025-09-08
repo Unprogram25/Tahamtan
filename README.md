@@ -1,7 +1,9 @@
 Serial & TCP Communication GUI 🔌
+
 This is a professional and versatile GUI application designed to simplify serial and TCP communications. Developed in Python using the tkinter library, this tool allows you to easily connect, send, and receive data from various devices and servers, providing a clear and efficient way to manage your communication links.
 
 Features ✨
+
 Clean and Intuitive UI: Built with tkinter for a responsive and user-friendly experience.
 
 Multi-Protocol Support:
@@ -23,6 +25,7 @@ End-of-Line (EOL) Options: Offers a choice between \r\n, \n, \r, and None for me
 Configuration Management: Automatically saves and loads your last-used port and baud rate settings to a config.json file.
 
 Installation and Setup 🚀
+
 To run this application, you need Python 3 and the following libraries. You can install them using pip:
 
 Bash
@@ -44,6 +47,7 @@ Baud Rate: Choose the desired baud rate for communication.
 Connect/Disconnect: Click the button to establish or terminate the serial connection.
 
 TCP Client Tab
+
 IP Address and Port: Enter the IP address and port of the target TCP server.
 
 Connect/Disconnect: Use this button to connect to the server.
@@ -51,6 +55,7 @@ Connect/Disconnect: Use this button to connect to the server.
 Ping: Click to measure the Round-Trip Time (RTT) to the destination IP address.
 
 TCP Server Tab
+
 Port: Specify the port on which you want the server to listen.
 
 Listen: Click this button to start the TCP server and accept incoming client connections.
@@ -58,6 +63,7 @@ Listen: Click this button to start the TCP server and accept incoming client con
 Messages sent and received will be displayed in the console window at the bottom of the application.
 
 Code Structure 🏗️
+
 The project is organized using an object-oriented and modular approach for clarity and maintainability.
 
 main.py: The core file that initializes the main GUI application.
@@ -73,7 +79,9 @@ ConfigurationManager: A utility class for saving and loading application setting
 helper_functions: A collection of reusable functions for drawing shapes and updating visual indicators.
 
 Contributing 🤝
+
 Contributions are welcome! If you have suggestions for new features, bug fixes, or performance improvements, please feel free to create a pull request.
 
 License 📄
+
 This project is licensed under the MIT License.

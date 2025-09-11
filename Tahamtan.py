@@ -129,9 +129,9 @@ class SerialManager:
         self.ports_combobox.grid(row=0, column=1, padx=5, pady=5)
         
         ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
-        self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="normal", width=6, font=default_font)
+        self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="normal", width=8, font=default_font)
         self.baud_combobox.grid(row=0, column=3, padx=5, pady=5)
-        self.baud_combobox.set(9600)
+        self.baud_combobox.set(115200)
 
         input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
@@ -240,7 +240,7 @@ class SerialManager:
                 self.update_port_list()
             self.connect_button.config(text="Connect")
             self.ports_combobox.config(state="readonly")
-            self.baud_combobox.config(state="readonly")
+            self.baud_combobox.config(state="normal")
         self.status_text.see(tk.END)
 
     def read_from_port(self):

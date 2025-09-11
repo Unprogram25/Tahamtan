@@ -128,9 +128,9 @@ class SerialManager:
         self.ports_combobox.grid(row=0, column=1, padx=5, pady=5)
         
         ttk.Label(input_frame, text="Baud Rate :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
-        self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="readonly", width=6, font=default_font)
+        self.baud_combobox = ttk.Combobox(input_frame, values=BAUD_RATES, state="normal", width=6, font=default_font)
         self.baud_combobox.grid(row=0, column=3, padx=5, pady=5)
-        self.baud_combobox.set(115200)
+        self.baud_combobox.set(9600)
 
         input_frame.columnconfigure(4, weight=1)
         self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
@@ -507,8 +507,8 @@ class TcpClientManager:
                     self.disconnect()
                     break
                 decoded_data = data.decode('utf-8', errors='ignore')
-                timestamp = time.strftime("%H:%M:%S")
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"[{timestamp}] Received TCP: {decoded_data}\n", 'received'))
+                # timestamp = time.strftime("%H:%M:%S")
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Received TCP: {decoded_data}\n", 'received'))
                 self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
                 winsound.Beep(915, 95)
         except socket.error as e:
@@ -736,8 +736,8 @@ class TcpServerManager:
                         # Gracefully break the loop when the client closes the connection
                         break
                     
-                    timestamp = time.strftime("%H:%M:%S")
-                    self.tab_frame.after(0, lambda addr=addr, data=data: self._log(f"[{timestamp}] Received from {addr}: {data.decode(errors='replace')}", 'info'))
+                    # timestamp = time.strftime("%H:%M:%S")
+                    self.tab_frame.after(0, lambda addr=addr, data=data: self._log(f"Received from {addr}: {data.decode(errors='replace')}", 'info'))
                     winsound.Beep(1415, 95)
 
                 except socket.timeout:
@@ -820,6 +820,7 @@ class TcpServerManager:
         """Helper method to safely log messages to the GUI."""
         self.status_text.insert(tk.END, f"{message}\n", tag)
         self.status_text.see(tk.END)
+
 class UdpManager:
     """Manages all UDP communication and its corresponding GUI elements."""
     def __init__(self, tab_frame, status_text_widget, eol_widgets):

@@ -106,14 +106,15 @@ class ConfigurationManager:
 
 class SerialManager:
     """Manages all serial communication and its corresponding GUI elements."""
-    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+    def __init__(self, tab_frame, status_text_widget, eol_widgets, hex_mode_var):
         self.tab_frame = tab_frame
         self.status_text = status_text_widget
         self.eol_widgets = eol_widgets
         self.ser = None
         self.config_manager = ConfigurationManager()
         self.create_serial_widgets()
-        
+        self.hex_mode_var = hex_mode_var
+
     def create_serial_widgets(self):
         """Creates all GUI widgets for the Serial tab."""
         # Serial input frame
@@ -243,56 +244,85 @@ class SerialManager:
         self.status_text.see(tk.END)
 
     def read_from_port(self):
-        """Reads data from the serial port in a separate thread."""
-        while self.ser and self.ser.is_open:
-            try:
-                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    winsound.Beep(615, 95) # Plays a sound when a message is received.
-                    line_cleaned = line.replace('\x1a', '')
-                    self.status_text.insert(tk.END, f"Received : {line_cleaned}\n\n", 'received')
-                    self.status_text.see(tk.END)
-            except serial.SerialException:
-                if self.ser and self.ser.is_open:
-                    self.ser.close()
-                self.tab_frame.after(0, lambda: self.update_ui(connected=False, unexpected_disconnect=True))
-                break
+            """Reads data from the serial port in a separate thread."""
+            while self.ser and self.ser.is_open:
+                try:
+                    # Read all available bytes from the port without blocking
+                    received_bytes = self.ser.read(self.ser.in_waiting)
+                    
+                    if received_bytes:
+                        winsound.Beep(615, 95) # Plays a sound when a message is received.
+                        
+                        # Check if the hex mode is active
+                        if self.hex_mode_var.get():
+                            # Display data in hexadecimal format
+                            hex_string = received_bytes.hex().upper()
+                            message_to_log = f"Received HEX: {hex_string}\n\n"
+                        else:
+                            # Display data as a regular string
+                            message_to_log = f"Received: {received_bytes.decode('utf-8', errors='ignore')}\n\n"
+                        
+                        self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
+                        self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+                        
+                except serial.SerialException:
+                    if self.ser and self.ser.is_open:
+                        self.ser.close()
+                    self.tab_frame.after(0, lambda: self.update_ui(connected=False, unexpected_disconnect=True))
+                    break
+                except Exception as e:
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Error reading from port: {e}\n", 'error'))
+                    break
 
-    def send_data(self, base_message):
-        """Sends data through the serial port."""
+    def send_data(self, data_to_send_bytes):
+        """Sends byte data through the serial port."""
         eol_option = self.eol_widgets[0].get()
         display_eol_var = self.eol_widgets[1]
-        
+
         if self.ser and self.ser.is_open:
+            # Add EOL bytes to the message
             if eol_option == "\\r\\n":
-                final_message = base_message + '\r\n'
+                eol_bytes = b'\r\n'
+                display_eol = "\\r\\n"
             elif eol_option == "\\n":
-                final_message = base_message + '\n'
+                eol_bytes = b'\n'
+                display_eol = "\\n"
             elif eol_option == "\\r":
-                final_message = base_message + '\r'
+                eol_bytes = b'\r'
+                display_eol = "\\r"
             else:
-                final_message = base_message
+                eol_bytes = b''
+                display_eol = ""
             
-            self.ser.write(final_message.encode('utf-8'))
+            # Concatenate the data and EOL bytes
+            final_bytes_to_send = data_to_send_bytes + eol_bytes
+            
+            self.ser.write(final_bytes_to_send)
+
+            # Determine the message to display in the UI
+            base_message_str = data_to_send_bytes.decode('utf-8', errors='ignore')
+
             if display_eol_var.get():
-                display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
+                display_message = base_message_str + display_eol
             else:
-                display_message = base_message
-            self.status_text.insert(tk.END, f"Sent : {display_message}\n", 'sent')
+                display_message = base_message_str
+            
+            self.status_text.insert(tk.END, f"Sent: {display_message}\n", 'sent')
             self.status_text.see(tk.END)
             
-            if base_message.strip() == "/reset":
+            # Check for the /reset command
+            if base_message_str.strip() == "/reset":
                 self.status_text.insert(tk.END, "Reset command sent. Disconnecting from port.\n Please reconnect after the device has rebooted.\n", 'warning')
                 self.status_text.see(tk.END)
                 self.ser.close()
                 self.update_ui(connected=False)
         else:
-            self.status_text.insert(tk.END, "Error : Not connected to a serial port.\n", 'error')
+            self.status_text.insert(tk.END, "Error: Not connected to a serial port.\n", 'error')
             self.status_text.see(tk.END)
 
 class TcpClientManager:
     """Manages all TCP communication and its corresponding GUI elements."""
-    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+    def __init__(self, tab_frame, status_text_widget, eol_widgets, hex_mode_var):
         self.tab_frame = tab_frame
         self.status_text = status_text_widget
         self.eol_widgets = eol_widgets
@@ -305,6 +335,7 @@ class TcpClientManager:
         self.status_text.tag_configure('error', foreground='Maroon')
         self.status_text.tag_configure('sent', foreground='blue')
         self.status_text.tag_configure('received', foreground='purple')
+        self.hex_mode_var = hex_mode_var
 
     def create_tcp_widgets(self):
         """Creates all GUI widgets for the TCP tab."""
@@ -498,62 +529,83 @@ class TcpClientManager:
         self.tab_frame.after(0, lambda: self.update_ui(connected=False))
 
     def read_from_socket(self):
-        """Reads data from the TCP socket in a separate thread."""
-        try:
-            while self.is_connected:
-                data = self.sock.recv(1024)
-                if not data:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Server closed the connection gracefully.\n", 'info'))
-                    self.disconnect()
-                    break
-                decoded_data = data.decode('utf-8', errors='ignore')
-                # timestamp = time.strftime("%H:%M:%S")
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Received TCP: {decoded_data}\n", 'received'))
-                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                winsound.Beep(915, 95)
-        except socket.error as e:
-            if self.is_connected:
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error: {e}\n", 'error'))
-                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-            self.disconnect()
+            """Reads data from the TCP socket in a separate thread."""
+            try:
+                while self.is_connected:
+                    data = self.sock.recv(1024)
+                    if not data:
+                        self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Server closed the connection gracefully.\n", 'info'))
+                        self.disconnect()
+                        break
+                    
+                    # Check if the hex mode is active
+                    if self.hex_mode_var.get():
+                        # Display data in hexadecimal format
+                        message_to_log = f"Received TCP HEX: {data.hex().upper()}\n"
+                    else:
+                        # Display data as a regular string
+                        message_to_log = f"Received TCP: {data.decode('utf-8', errors='ignore')}\n"
 
-    def send_data(self, base_message):
-        """Sends data through the TCP socket."""
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
+                    self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+                    winsound.Beep(915, 95)
+                    
+            except socket.error as e:
+                if self.is_connected:
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error: {e}\n", 'error'))
+                    self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+                self.disconnect()
+
+    def send_data(self, data_to_send_bytes):
+        """Sends byte data through the TCP socket."""
         if not self.is_connected:
-            self.status_text.insert(tk.END, "Error : TCP client is not connected.\n", 'error')
+            self.status_text.insert(tk.END, "Error: TCP client is not connected.\n", 'error')
             self.status_text.see(tk.END)
             return
 
-        if not base_message.strip():
-            self.status_text.insert(tk.END, "Error : Cannot send empty message.\n", 'error')
+        if not data_to_send_bytes:
+            self.status_text.insert(tk.END, "Error: Cannot send empty message.\n", 'error')
             self.status_text.see(tk.END)
             return
-        
+
         eol_option = self.eol_widgets[0].get()
         display_eol_var = self.eol_widgets[1]
 
-        final_message = base_message
+        # Add EOL bytes to the message
         if eol_option == "\\r\\n":
-            final_message += '\r\n'
+            eol_bytes = b'\r\n'
+            display_eol_str = "\\r\\n"
         elif eol_option == "\\n":
-            final_message += '\n'
+            eol_bytes = b'\n'
+            display_eol_str = "\\n"
         elif eol_option == "\\r":
-            final_message += '\r'
-        
+            eol_bytes = b'\r'
+            display_eol_str = "\\r"
+        else:
+            eol_bytes = b''
+            display_eol_str = ""
+
+        final_bytes_to_send = data_to_send_bytes + eol_bytes
+
         try:
-            encoded_message = final_message.encode('utf-8', errors='replace')
-            self.sock.sendall(encoded_message)
-            
-            display_message = (
-                final_message.replace('\r', '\\r').replace('\n', '\\n')
-                if display_eol_var.get() else base_message
-            )
-            self.status_text.insert(tk.END, f"Sent TCP : {display_message}\n", 'sent')
+            self.sock.sendall(final_bytes_to_send)
+
+            # Determine the message to display in the UI
+            # We use 'decode' for display purposes, ignoring errors for non-UTF-8 characters (like hex)
+            base_message_str = data_to_send_bytes.decode('utf-8', errors='ignore')
+
+            if display_eol_var.get():
+                display_message = base_message_str + display_eol_str
+            else:
+                display_message = base_message_str
+
+            self.status_text.insert(tk.END, f"Sent TCP: {display_message}\n", 'sent')
         except socket.error as e:
             self.status_text.insert(tk.END, f"Error sending data: {e}\n", 'error')
             self.disconnect()
-        self.status_text.see(tk.END)
         
+        self.status_text.see(tk.END)        
+
     def update_ui(self, connected):
         """Updates the UI elements after a connection attempt for the given protocol."""
         if connected:
@@ -570,7 +622,7 @@ class TcpClientManager:
 
 class TcpServerManager:
     """Manages a TCP server and its corresponding GUI elements."""
-    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+    def __init__(self, tab_frame, status_text_widget, eol_widgets, hex_mode_var):
         self.tab_frame = tab_frame
         self.status_text = status_text_widget
         self.eol_widgets = eol_widgets
@@ -580,6 +632,7 @@ class TcpServerManager:
         self.port_entry = None
         self.start_button = None
         self.create_server_widgets()
+        self.hex_mode_var = hex_mode_var
 
         self.status_text.tag_configure('connected', foreground='green')
         self.status_text.tag_configure('disconnected', foreground='red')
@@ -727,37 +780,46 @@ class TcpServerManager:
             self.tab_frame.after(0, lambda: self._log(f"Fatal error in accept_clients: {e}", 'error'))
 
     def handle_client(self, client_socket, addr):
-        """Handles data reception from a single client."""
-        try:
-            while self.is_running and client_socket.fileno() != -1:
-                try:
-                    data = client_socket.recv(1024)
-                    if not data:
-                        # Gracefully break the loop when the client closes the connection
-                        break
-                    
-                    # timestamp = time.strftime("%H:%M:%S")
-                    self.tab_frame.after(0, lambda addr=addr, data=data: self._log(f"Received from {addr}: {data.decode(errors='replace')}", 'info'))
-                    winsound.Beep(1415, 95)
-
-                except socket.timeout:
-                    continue
-                except (ConnectionResetError, OSError) as e:
-                    # Capture the exception 'e' correctly and break the loop on error
-                    self.tab_frame.after(0, lambda e=e, addr=addr: self._log(f"Connection error with {addr}: {e}", 'error'))
-                    break
-        finally:
-            self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected", 'disconnected'))
+            """
+            Handles data reception from a single client.
+            """
             try:
-                # Remove the socket from the dict and close it
-                if client_socket in self.client_sockets:
-                    del self.client_sockets[client_socket]
-                client_socket.close()
-            except Exception:
-                pass
+                while self.is_running and client_socket.fileno() != -1:
+                    try:
+                        data = client_socket.recv(1024)
+                        if not data:
+                            # Gracefully break the loop when the client closes the connection
+                            break
 
-    def send_data(self, base_message):
-        """Sends data to all connected clients."""
+                        # Check if the hex mode is active
+                        if self.hex_mode_var.get():
+                            # Display data in hexadecimal format
+                            message_to_log = f"Received from {addr} HEX: {data.hex().upper()}\n"
+                        else:
+                            # Display data as a regular string
+                            message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}\n"
+                        
+                        self.tab_frame.after(0, lambda: self._log(message_to_log, 'received'))
+                        winsound.Beep(1415, 95)
+
+                    except socket.timeout:
+                        continue
+                    except (ConnectionResetError, OSError) as e:
+                        # Capture the exception 'e' correctly and break the loop on error
+                        self.tab_frame.after(0, lambda e=e, addr=addr: self._log(f"Connection error with {addr}: {e}", 'error'))
+                        break
+            finally:
+                self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected", 'disconnected'))
+                try:
+                    # Remove the socket from the dict and close it
+                    if client_socket in self.client_sockets:
+                        del self.client_sockets[client_socket]
+                    client_socket.close()
+                except Exception:
+                    pass
+
+    def send_data(self, data_to_send_bytes):
+        """Sends byte data to all connected clients."""
         if not self.is_running:
             self.tab_frame.after(0, lambda: self._log("Error: Server is not running.", 'error'))
             return
@@ -765,21 +827,29 @@ class TcpServerManager:
         if not self.client_sockets:
             self.tab_frame.after(0, lambda: self._log("Error: No TCP clients are connected.", 'error'))
             return
-        
-        if not base_message.strip():
+
+        if not data_to_send_bytes:
             self.tab_frame.after(0, lambda: self._log("Error: Cannot send empty message.", 'error'))
             return
 
         eol_option = self.eol_widgets[0].get()
         display_eol_var = self.eol_widgets[1]
-
-        final_message = base_message
+        
+        # Add EOL bytes to the message
         if eol_option == "\\r\\n":
-            final_message += '\r\n'
+            eol_bytes = b'\r\n'
+            display_eol_str = "\\r\\n"
         elif eol_option == "\\n":
-            final_message += '\n'
+            eol_bytes = b'\n'
+            display_eol_str = "\\n"
         elif eol_option == "\\r":
-            final_message += '\r'
+            eol_bytes = b'\r'
+            display_eol_str = "\\r"
+        else:
+            eol_bytes = b''
+            display_eol_str = ""
+            
+        final_bytes_to_send = data_to_send_bytes + eol_bytes
 
         # Iterate over a copy of the dictionary to avoid errors if clients disconnect during the loop
         for client_sock, thread in list(self.client_sockets.items()):
@@ -787,11 +857,16 @@ class TcpServerManager:
                 if client_sock.fileno() == -1:
                     continue
                 
-                client_sock.sendall(final_message.encode('utf-8', errors='replace'))
-                display_message = (
-                    final_message.replace('\r', '\\r').replace('\n', '\\n')
-                    if display_eol_var.get() else base_message
-                )
+                client_sock.sendall(final_bytes_to_send)
+
+                # Determine the message to display in the UI
+                # We use 'decode' for display purposes, ignoring errors for non-UTF-8 characters (like hex)
+                base_message_str = data_to_send_bytes.decode('utf-8', errors='ignore')
+
+                if display_eol_var.get():
+                    display_message = base_message_str + display_eol_str
+                else:
+                    display_message = base_message_str
                 
                 peer = 'Unknown'
                 try:
@@ -799,14 +874,14 @@ class TcpServerManager:
                 except OSError:
                     pass
                 
-                self.tab_frame.after(0, lambda display_message=display_message, peer=peer: self._log(f"[{time.strftime('%H:%M:%S')}] Sent to {peer} : {display_message}", 'sent'))
+                self.tab_frame.after(0, lambda display_message=display_message, peer=peer: self._log(f"[{time.strftime('%H:%M:%S')}] Sent to {peer}: {display_message}", 'sent'))
             except (socket.error, OSError) as e:
                 peer = 'Unknown'
                 try:
                     peer = client_sock.getpeername()
                 except OSError:
                     pass
-                self.tab_frame.after(0, lambda e=e, peer=peer: self._log(f"Error sending to {peer} : {e}", 'error'))
+                self.tab_frame.after(0, lambda e=e, peer=peer: self._log(f"Error sending to {peer}: {e}", 'error'))
                 try:
                     client_sock.close()
                 except Exception:
@@ -815,7 +890,6 @@ class TcpServerManager:
                     del self.client_sockets[client_sock]
         self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
 
-
     def _log(self, message, tag='info'):
         """Helper method to safely log messages to the GUI."""
         self.status_text.insert(tk.END, f"{message}\n", tag)
@@ -823,7 +897,7 @@ class TcpServerManager:
 
 class UdpManager:
     """Manages all UDP communication and its corresponding GUI elements."""
-    def __init__(self, tab_frame, status_text_widget, eol_widgets):
+    def __init__(self, tab_frame, status_text_widget, eol_widgets, hex_mode_var):
         self.tab_frame = tab_frame
         self.status_text = status_text_widget
         self.eol_widgets = eol_widgets
@@ -831,6 +905,7 @@ class UdpManager:
         self.is_connected = False
         self.read_thread = None
         self.create_udp_widgets()
+        self.hex_mode_var = hex_mode_var
 
     def create_udp_widgets(self):
         """Creates all GUI widgets for the UDP tab."""
@@ -923,56 +998,84 @@ class UdpManager:
         self.tab_frame.after(0, lambda: self.update_ui(connected=False))
 
     def read_from_socket(self):
-        """Reads data from the UDP socket in a separate thread."""
-        while self.is_connected and self.sock:
-            try:
-                data, addr = self.sock.recvfrom(1024)
-                decoded_data = data.decode('utf-8', errors='ignore')
-                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Received from {addr}: {decoded_data}\n", 'received'))
-                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                winsound.Beep(1115, 95)
-            except socket.error as e:
-                if self.is_connected:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket Error : {e}\n", 'error'))
-                self.disconnect()
-                break
+            """Reads data from the UDP socket in a separate thread."""
+            while self.is_connected and self.sock:
+                try:
+                    data, addr = self.sock.recvfrom(1024)
+                    
+                    # Check if the hex mode is active
+                    if self.hex_mode_var.get():
+                        # Display data in hexadecimal format
+                        message_to_log = f"Received from {addr} HEX: {data.hex().upper()}\n"
+                    else:
+                        # Display data as a regular string
+                        message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}\n"
 
-    def send_data(self, base_message):
-        """Sends data through the UDP socket."""
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
+                    self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+                    winsound.Beep(1115, 95)
+                except socket.error as e:
+                    if self.is_connected:
+                        self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket Error : {e}\n", 'error'))
+                    self.disconnect()
+                    break
+
+    def send_data(self, data_to_send_bytes):
+        """Sends byte data through the UDP socket."""
         dest_ip = self.dest_ip_entry.get()
         dest_port = self.dest_port_entry.get()
         
         if not self.is_connected:
-            self.status_text.insert(tk.END, "Error : UDP socket is not listening.\n", 'error')
+            self.status_text.insert(tk.END, "Error: UDP socket is not listening.\n", 'error')
             self.status_text.see(tk.END)
             return
         
         if not dest_ip or not dest_port:
-            self.status_text.insert(tk.END, "Error : Destination IP and Port are required for sending.\n", 'error')
+            self.status_text.insert(tk.END, "Error: Destination IP and Port are required for sending.\n", 'error')
+            self.status_text.see(tk.END)
+            return
+        
+        try:
+            dest_port = int(dest_port)
+        except ValueError:
+            self.status_text.insert(tk.END, "Error: Destination port must be a valid number.\n", 'error')
             self.status_text.see(tk.END)
             return
 
         eol_option = self.eol_widgets[0].get()
         display_eol_var = self.eol_widgets[1]
 
+        # Add EOL bytes to the message
         if eol_option == "\\r\\n":
-            final_message = base_message + '\r\n'
+            eol_bytes = b'\r\n'
+            display_eol_str = "\\r\\n"
         elif eol_option == "\\n":
-            final_message = base_message + '\n'
+            eol_bytes = b'\n'
+            display_eol_str = "\\n"
         elif eol_option == "\\r":
-            final_message = base_message + '\r'
+            eol_bytes = b'\r'
+            display_eol_str = "\\r"
         else:
-            final_message = base_message
+            eol_bytes = b''
+            display_eol_str = ""
+
+        final_bytes_to_send = data_to_send_bytes + eol_bytes
         
         try:
-            self.sock.sendto(final_message.encode('utf-8'), (dest_ip, int(dest_port)))
+            self.sock.sendto(final_bytes_to_send, (dest_ip, dest_port))
+
+            # Determine the message to display in the UI
+            base_message_str = data_to_send_bytes.decode('utf-8', errors='ignore')
+
             if display_eol_var.get():
-                display_message = final_message.replace('\r', '\\r').replace('\n', '\\n')
+                display_message = base_message_str + display_eol_str
             else:
-                display_message = base_message
+                display_message = base_message_str
+            
             self.status_text.insert(tk.END, f"Sent to {dest_ip}:{dest_port}: {display_message}\n", 'sent')
         except (socket.error, ValueError) as e:
             self.status_text.insert(tk.END, f"Error sending data: {e}\n", 'error')
+        
         self.status_text.see(tk.END)
 
     def update_ui(self, connected):
@@ -991,7 +1094,7 @@ class App:
     """The main application class that sets up the GUI and manages tabs."""
     def __init__(self, window):
         self.window = window
-        self.window.title("Tahamtan Serial/TCP Comm | Dev by Afshin Moradzadeh")
+        self.window.title("Tahamtan Serial/TCP Communication")
         self.window.geometry("515x615")
         self.window.configure(bg="#F0F0F0")
         # window.resizable(False, False)
@@ -1005,8 +1108,8 @@ class App:
         self.tcp_client_tab = None
         self.tcp_server_tab = None
         self.udp_tab = None
+        self.about_tab = None
         self.tab_control = None
-      
         self.setup_gui()
         
     def setup_gui(self):
@@ -1029,6 +1132,9 @@ class App:
 
         self.udp_tab = ttk.Frame(self.tab_control)
         self.tab_control.add(self.udp_tab, text="UDP")
+
+        self.about_tab = ttk.Frame(self.tab_control)
+        self.tab_control.add(self.about_tab, text="About")
         
         # Create a single Text widget with a scrollbar for each tab
         # This will be passed to the respective Manager class
@@ -1088,6 +1194,52 @@ class App:
         self.udp_status_text.bind("<Button-1>", lambda e: "break")
         udp_scrollbar.config(command=self.udp_status_text.yview)
 
+        # About output Text Box
+        about_text_with_scroll_frame = tk.Frame(self.about_tab)
+        about_text_with_scroll_frame.pack(side=tk.BOTTOM, padx=(10, 10), pady=10, fill=tk.BOTH, expand=True)
+
+        about_scrollbar = tk.Scrollbar(about_text_with_scroll_frame)
+        about_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.about_status_text = tk.Text(
+            about_text_with_scroll_frame, height=20, width=50, font="TkDefaultFont 11",
+            yscrollcommand=about_scrollbar.set, padx=10, wrap=tk.WORD, takefocus=False, bg="#F0F0F0"
+        )
+        self.about_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Add content to the About Text Box
+        about_text = """
+About Tahamtan v1.0
+
+Tahamtan is a versatile and user-friendly communication terminal designed to simplify the process of interacting with various devices and networks. It provides a clean, intuitive interface for managing connections across multiple protocols, making it an ideal tool for developers, hobbyists, and network professionals.
+
+The application’s core functionality revolves around its support for four key communication protocols:
+
+Serial (COM) Port: Establish a direct connection to devices using a serial port, commonly used for embedded systems, microcontrollers, and IoT devices.
+
+TCP Client: Connect to a TCP server on a specified IP address and port, enabling you to test network services and client-server communication.
+
+TCP Server: Act as a server and listen for incoming TCP connections, allowing multiple clients to connect and exchange data with your application.
+
+UDP: Send and receive datagram packets to a specific IP address and port, perfect for testing network services where a connectionless protocol is required.
+
+Advanced Features
+Tahamtan goes beyond basic connectivity with features that enhance debugging and data handling:
+
+ASCII and Hexadecimal (Hex) Data Support: Seamlessly switch between sending and receiving data in standard ASCII text or raw Hexadecimal format. This is crucial for debugging low-level protocols and binary data streams.
+
+Clear Output: A simple and effective way to manage your screen. You can instantly clear the output log on the active tab using the keyboard shortcut Ctrl + L to maintain a clean workspace.
+
+Contact
+Tahamtan was created by Afshin Moradzadeh.
+For support or inquiries, please contact:
+
+Email: mrzafshin21@gmail.com
+        """
+        self.about_status_text.insert(tk.END, about_text)
+        self.about_status_text.config(state=tk.DISABLED) 
+        about_scrollbar.config(command=self.about_status_text.yview)
+
         # Configure the 'sent', 'received' etc. tags
         self.serial_status_text.tag_configure('sent', foreground='blue')
         self.serial_status_text.tag_configure('received', foreground='green')
@@ -1140,19 +1292,25 @@ class App:
         self.display_eol_checkbutton = ttk.Checkbutton(send_frame, text="Show \\r\\n", variable=self.display_eol_var)
         self.display_eol_checkbutton.grid(row=1, column=3, columnspan=2, padx=5, pady=5)
 
-        # 5. Send button
+        # 5.Create a BooleanVar to store the state of the hex checkbox
+        self.send_as_hex_var = tk.BooleanVar(value=False)
+        self.send_as_hex_checkbutton = ttk.Checkbutton(send_frame, text="HEX", variable=self.send_as_hex_var)
+        # Grid the checkbutton in the specified location: row 1, column 0
+        self.send_as_hex_checkbutton.grid(row=1, column=0, padx=5, pady=5)
+        
+        # 6. Send button
         send_button = ttk.Button(send_frame, text="Send", command=self.send_data, style='BigSend.TButton')
         send_button.grid(row=1, column=1, columnspan=1, pady=(5,5), sticky="ew")
 
-        # 6. Dynamic config widgets (initially hidden)
+        # 7. Dynamic config widgets (initially hidden)
         self.conf_key_combobox = None
         self.conf_value_entry = None
         
         # --- Instantiate the managers after the Text widgets are created ---
-        self.serial_manager = SerialManager(self.serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var))
-        self.tcp_client_manager = TcpClientManager(self.tcp_client_tab, self.tcp_client_status_text, (self.eol_combobox, self.display_eol_var))
-        self.tcp_server_manager = TcpServerManager(self.tcp_server_tab, self.tcp_server_status_text, (self.eol_combobox, self.display_eol_var))
-        self.udp_manager = UdpManager(self.udp_tab, self.udp_status_text, (self.eol_combobox, self.display_eol_var)) 
+        self.serial_manager = SerialManager(self.serial_tab, self.serial_status_text, (self.eol_combobox, self.display_eol_var), self.send_as_hex_var)
+        self.tcp_client_manager = TcpClientManager(self.tcp_client_tab, self.tcp_client_status_text, (self.eol_combobox, self.display_eol_var), self.send_as_hex_var)
+        self.tcp_server_manager = TcpServerManager(self.tcp_server_tab, self.tcp_server_status_text, (self.eol_combobox, self.display_eol_var), self.send_as_hex_var)
+        self.udp_manager = UdpManager(self.udp_tab, self.udp_status_text, (self.eol_combobox, self.display_eol_var), self.send_as_hex_var) 
 
         # Bind the Ctrl+L keyboard shortcut to the clear function
         self.window.bind('<Control-l>', self.clear_status_box)
@@ -1191,7 +1349,7 @@ class App:
         """Sends data from the input widgets based on the current active tab."""
         current_tab_text = self.tab_control.tab(self.tab_control.select(), "text")
         
-        # Determine which text widget to use based on the current tab
+        # Determine which text widget and manager to use based on the current tab
         if current_tab_text == "Serial":
             text_widget = self.serial_status_text
             manager = self.serial_manager
@@ -1214,7 +1372,7 @@ class App:
             selected_key = self.conf_key_combobox.get()
             custom_value = self.conf_value_entry.get()
             if not selected_key:
-                text_widget.insert(tk.END, "Error : Please select a configuration key.\n", 'error')
+                text_widget.insert(tk.END, "Error: Please select a configuration key.\n", 'error')
                 text_widget.see(tk.END)
                 return
             base_message = f"{preset_command}{selected_key} {custom_value}"
@@ -1223,11 +1381,30 @@ class App:
             base_message = f"{preset_command}{custom_message}"
         
         if not base_message.strip():
-            text_widget.insert(tk.END, "Error : Please enter or select a command to send.\n", 'error')
+            text_widget.insert(tk.END, "Error: Please enter or select a command to send.\n", 'error')
             text_widget.see(tk.END)
             return
-            
-        manager.send_data(base_message)
+
+        # Check if the "Hex" checkbox is ticked
+        if self.send_as_hex_var.get():
+            try:
+                # Convert the message string to bytes from a hex string, removing any spaces
+                send_data_bytes = bytes.fromhex(base_message.replace(" ", ""))
+                # Display the message with a 'sent' tag
+                text_widget.insert(tk.END, f"Sent HEX: {base_message}\n", 'sent')
+            except ValueError:
+                text_widget.insert(tk.END, "Error: Invalid hexadecimal string.\n", 'error')
+                text_widget.see(tk.END)
+                return
+        else:
+            # Send as a normal string, encoding it to bytes
+            send_data_bytes = base_message.encode('utf-8')
+            # Display the message with a 'sent' tag
+            # text_widget.insert(tk.END, f"Sent: {base_message}\n", 'sent')
+
+        # Pass the converted data (bytes) to the manager's send_data method
+        manager.send_data(send_data_bytes)
+        text_widget.see(tk.END)
 
     def handle_preset_selection(self, event):
         """Dynamically changes the message entry widget based on the selected command."""

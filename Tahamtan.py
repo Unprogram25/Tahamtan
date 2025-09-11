@@ -257,10 +257,10 @@ class SerialManager:
                         if self.hex_mode_var.get():
                             # Display data in hexadecimal format
                             hex_string = received_bytes.hex().upper()
-                            message_to_log = f"Received HEX: {hex_string}\n\n"
+                            message_to_log = f"Received HEX: {hex_string}"
                         else:
                             # Display data as a regular string
-                            message_to_log = f"Received: {received_bytes.decode('utf-8', errors='ignore')}\n\n"
+                            message_to_log = f"Received: {received_bytes.decode('utf-8', errors='ignore')}"
                         
                         self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
                         self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
@@ -672,7 +672,7 @@ class TcpServerManager:
     def toggle_server_threaded(self):
         """Starts or stops the server in a separate thread."""
         thread = threading.Thread(target=self.toggle_server, daemon=True)
-        self.status_text.insert(tk.END, "Starting TCP server...\n", 'info')
+        # self.status_text.insert(tk.END, "Starting TCP server...\n", 'info')
         self.status_text.see(tk.END)
         thread.start()
 
@@ -708,7 +708,7 @@ class TcpServerManager:
             self.server_socket.listen(5)
             self.is_running = True
             
-            self.tab_frame.after(0, lambda: self._log(f"TCP Server started on port {port}", 'connected'))
+            self.tab_frame.after(0, lambda: self._log(f"TCP Server started on port {port}\n", 'connected'))
             threading.Thread(target=self.accept_clients, daemon=True).start()
             self.tab_frame.after(0, lambda: self.start_button.config(text="Stop Server"))
             self.tab_frame.after(0, lambda: self.port_entry.config(state="disabled"))
@@ -749,8 +749,8 @@ class TcpServerManager:
         self.tab_frame.after(0, lambda: update_status_lights((self.disconnected_canvas, self.connecting_canvas, self.connected_canvas), "disconnected"))
         
         timestamp = time.strftime("%H:%M:%S")
-        self.tab_frame.after(0, lambda: self._log(f"[{timestamp}] TCP Server stopped", 'disconnected'))
-        self.tab_frame.after(0, lambda: self._log(f"{disconnected_count} clients disconnected.", 'info'))
+        self.tab_frame.after(0, lambda: self._log(f"[{timestamp}] TCP Server stopped\n", 'disconnected'))
+        self.tab_frame.after(0, lambda: self._log(f"{disconnected_count} clients disconnected.\n", 'info'))
 
     def accept_clients(self):
         """Accepts incoming client connections in a separate thread."""
@@ -769,7 +769,7 @@ class TcpServerManager:
                     self.client_sockets[client_socket] = thread
                     thread.start()
 
-                    self.tab_frame.after(0, lambda: self._log(f"Client connected from {addr}", 'connected'))
+                    self.tab_frame.after(0, lambda: self._log(f"Client connected from {addr}\n", 'connected'))
 
                 except OSError as e:
                     if not self.is_running:
@@ -794,10 +794,10 @@ class TcpServerManager:
                         # Check if the hex mode is active
                         if self.hex_mode_var.get():
                             # Display data in hexadecimal format
-                            message_to_log = f"Received from {addr} HEX: {data.hex().upper()}\n"
+                            message_to_log = f"Received from {addr} HEX: {data.hex().upper()}"
                         else:
                             # Display data as a regular string
-                            message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}\n"
+                            message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}"
                         
                         self.tab_frame.after(0, lambda: self._log(message_to_log, 'received'))
                         winsound.Beep(1415, 95)
@@ -809,7 +809,7 @@ class TcpServerManager:
                         self.tab_frame.after(0, lambda e=e, addr=addr: self._log(f"Connection error with {addr}: {e}", 'error'))
                         break
             finally:
-                self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected", 'disconnected'))
+                self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected\n", 'disconnected'))
                 try:
                     # Remove the socket from the dict and close it
                     if client_socket in self.client_sockets:
@@ -874,7 +874,7 @@ class TcpServerManager:
                 except OSError:
                     pass
                 
-                self.tab_frame.after(0, lambda display_message=display_message, peer=peer: self._log(f"[{time.strftime('%H:%M:%S')}] Sent to {peer}: {display_message}", 'sent'))
+                self.tab_frame.after(0, lambda display_message=display_message, peer=peer: self._log(f"[{time.strftime('%H:%M:%S')}] Sent to {peer}: {display_message}\n", 'sent'))
             except (socket.error, OSError) as e:
                 peer = 'Unknown'
                 try:
@@ -892,7 +892,7 @@ class TcpServerManager:
 
     def _log(self, message, tag='info'):
         """Helper method to safely log messages to the GUI."""
-        self.status_text.insert(tk.END, f"{message}\n", tag)
+        self.status_text.insert(tk.END, f"{message}", tag)
         self.status_text.see(tk.END)
 
 class UdpManager:

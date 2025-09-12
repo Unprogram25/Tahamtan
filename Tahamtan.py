@@ -244,35 +244,49 @@ class SerialManager:
         self.status_text.see(tk.END)
 
     def read_from_port(self):
-            """Reads data from the serial port in a separate thread."""
-            while self.ser and self.ser.is_open:
-                try:
-                    # Read all available bytes from the port without blocking
-                    received_bytes = self.ser.read(self.ser.in_waiting)
-                    
-                    if received_bytes:
-                        winsound.Beep(615, 95) # Plays a sound when a message is received.
-                        
-                        # Check if the hex mode is active
-                        if self.hex_mode_var.get():
-                            # Display data in hexadecimal format
-                            hex_string = received_bytes.hex().upper()
-                            message_to_log = f"Received HEX: {hex_string}"
+        """Reads data from the serial port in a separate thread."""
+        buffer = b""  # Accumulates incoming data across reads
+
+        while self.ser and self.ser.is_open:
+            try:
+                # Read a limited chunk to avoid overflow
+                chunk_size = min(self.ser.in_waiting, 256)
+                received_bytes = self.ser.read(chunk_size)
+
+                if received_bytes:
+                    buffer += received_bytes
+                    winsound.Beep(615, 95)  # Audible notification for incoming message
+
+                    # Extract and process complete lines while preserving newline characters
+                    lines = buffer.splitlines(keepends=True)
+                    if lines:
+                        # Keep the last line in buffer if it's incomplete (no trailing \n)
+                        if not lines[-1].endswith(b'\n'):
+                            buffer = lines.pop()
                         else:
-                            # Display data as a regular string
-                            message_to_log = f"Received: {received_bytes.decode('utf-8', errors='ignore')}"
-                        
-                        self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
-                        self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                        
-                except serial.SerialException:
-                    if self.ser and self.ser.is_open:
-                        self.ser.close()
-                    self.tab_frame.after(0, lambda: self.update_ui(connected=False, unexpected_disconnect=True))
-                    break
-                except Exception as e:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Error reading from port: {e}\n", 'error'))
-                    break
+                            buffer = b""
+
+                        for line in lines:
+                            if self.hex_mode_var.get():
+                                # Format the message in hexadecimal representation
+                                message_to_log = f"Received HEX: {line.hex().upper()}"
+                            else:
+                                # Decode the message as UTF-8 text, preserving newline
+                                message_to_log = f"Received: {line.decode('utf-8', errors='ignore')}"
+
+                            # Display the message in the UI and scroll to the latest entry
+                            self.tab_frame.after(0, lambda msg=message_to_log: self.status_text.insert(tk.END, msg, 'received'))
+                            self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+
+            except serial.SerialException:
+                if self.ser and self.ser.is_open:
+                    self.ser.close()
+                self.tab_frame.after(0, lambda: self.update_ui(connected=False, unexpected_disconnect=True))
+                break
+
+            except Exception as e:
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"Error reading from port: {e}\n", 'error'))
+                break
 
     def send_data(self, data_to_send_bytes):
         """Sends byte data through the serial port."""
@@ -529,32 +543,42 @@ class TcpClientManager:
         self.tab_frame.after(0, lambda: self.update_ui(connected=False))
 
     def read_from_socket(self):
-            """Reads data from the TCP socket in a separate thread."""
-            try:
-                while self.is_connected:
-                    data = self.sock.recv(1024)
-                    if not data:
-                        self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Server closed the connection gracefully.\n", 'info'))
-                        self.disconnect()
-                        break
-                    
-                    # Check if the hex mode is active
-                    if self.hex_mode_var.get():
-                        # Display data in hexadecimal format
-                        message_to_log = f"Received TCP HEX: {data.hex().upper()}\n"
-                    else:
-                        # Display data as a regular string
-                        message_to_log = f"Received TCP: {data.decode('utf-8', errors='ignore')}\n"
+        """Reads data from the TCP socket in a separate thread."""
+        buffer = b""  # Accumulates incoming data across recv calls
 
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
+        try:
+            while self.is_connected:
+                data = self.sock.recv(1024)
+                if not data:
+                    # Remote server closed the connection
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, "Server closed the connection gracefully.\n", 'info'))
+                    self.disconnect()
+                    break
+
+                buffer += data  # Append newly received data to the buffer
+
+                # Extract and process complete messages separated by newline
+                while b'\n' in buffer:
+                    line, buffer = buffer.split(b'\n', 1)  # Remove the newline from the line
+
+                    if self.hex_mode_var.get():
+                        # Format the message in hexadecimal representation
+                        message_to_log = f"Received TCP HEX: {line.hex().upper()}"
+                    else:
+                        # Decode the message as UTF-8 text
+                        message_to_log = f"Received TCP: {line.decode('utf-8', errors='ignore')}"
+
+                    # Display the message in the UI and scroll to the latest entry
+                    self.tab_frame.after(0, lambda msg=message_to_log: self.status_text.insert(tk.END, msg + '\n', 'received'))
                     self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                    winsound.Beep(915, 95)
-                    
-            except socket.error as e:
-                if self.is_connected:
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error: {e}\n", 'error'))
-                    self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                self.disconnect()
+                    winsound.Beep(915, 95)  # Audible notification for incoming message
+
+        except socket.error as e:
+            if self.is_connected:
+                # Display socket error in the UI
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"TCP connection Error: {e}\n", 'error'))
+                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+            self.disconnect()
 
     def send_data(self, data_to_send_bytes):
         """Sends byte data through the TCP socket."""
@@ -780,43 +804,57 @@ class TcpServerManager:
             self.tab_frame.after(0, lambda: self._log(f"Fatal error in accept_clients: {e}", 'error'))
 
     def handle_client(self, client_socket, addr):
-            """
-            Handles data reception from a single client.
-            """
-            try:
-                while self.is_running and client_socket.fileno() != -1:
-                    try:
-                        data = client_socket.recv(1024)
-                        if not data:
-                            # Gracefully break the loop when the client closes the connection
-                            break
+        """
+        Handles data reception from a single client.
+        """
+        buffer = b""  # Accumulates incoming data across recv calls
 
-                        # Check if the hex mode is active
-                        if self.hex_mode_var.get():
-                            # Display data in hexadecimal format
-                            message_to_log = f"Received from {addr} HEX: {data.hex().upper()}"
-                        else:
-                            # Display data as a regular string
-                            message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}"
-                        
-                        self.tab_frame.after(0, lambda: self._log(message_to_log, 'received'))
-                        winsound.Beep(1415, 95)
-
-                    except socket.timeout:
-                        continue
-                    except (ConnectionResetError, OSError) as e:
-                        # Capture the exception 'e' correctly and break the loop on error
-                        self.tab_frame.after(0, lambda e=e, addr=addr: self._log(f"Connection error with {addr}: {e}", 'error'))
-                        break
-            finally:
-                self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected\n", 'disconnected'))
+        try:
+            while self.is_running and client_socket.fileno() != -1:
                 try:
-                    # Remove the socket from the dict and close it
-                    if client_socket in self.client_sockets:
-                        del self.client_sockets[client_socket]
-                    client_socket.close()
-                except Exception:
-                    pass
+                    data = client_socket.recv(1024)
+                    if not data:
+                        # Client closed the connection gracefully
+                        break
+
+                    buffer += data  # Append newly received data to the buffer
+
+                    # Extract and process complete lines while preserving newline characters
+                    lines = buffer.splitlines(keepends=True)
+                    if lines:
+                        # Keep the last line in buffer if it's incomplete (no trailing \n)
+                        if not lines[-1].endswith(b'\n'):
+                            buffer = lines.pop()
+                        else:
+                            buffer = b""
+
+                        for line in lines:
+                            if self.hex_mode_var.get():
+                                # Format the message in hexadecimal representation
+                                message_to_log = f"Received from {addr} HEX: {line.hex().upper()}"
+                            else:
+                                # Decode the message as UTF-8 text, preserving newline
+                                message_to_log = f"Received from {addr}: {line.decode('utf-8', errors='ignore')}"
+
+                            # Log the message and trigger UI update
+                            self.tab_frame.after(0, lambda msg=message_to_log: self._log(msg, 'received'))
+                            winsound.Beep(1415, 95)  # Audible notification for incoming message
+
+                except socket.timeout:
+                    continue
+                except (ConnectionResetError, OSError) as e:
+                    # Log connection error and exit loop
+                    self.tab_frame.after(0, lambda e=e, addr=addr: self._log(f"Connection error with {addr}: {e}", 'error'))
+                    break
+        finally:
+            # Log client disconnection and clean up resources
+            self.tab_frame.after(0, lambda addr=addr: self._log(f"Client {addr} disconnected\n", 'disconnected'))
+            try:
+                if client_socket in self.client_sockets:
+                    del self.client_sockets[client_socket]
+                client_socket.close()
+            except Exception:
+                pass
 
     def send_data(self, data_to_send_bytes):
         """Sends byte data to all connected clients."""
@@ -998,27 +1036,30 @@ class UdpManager:
         self.tab_frame.after(0, lambda: self.update_ui(connected=False))
 
     def read_from_socket(self):
-            """Reads data from the UDP socket in a separate thread."""
-            while self.is_connected and self.sock:
-                try:
-                    data, addr = self.sock.recvfrom(1024)
-                    
-                    # Check if the hex mode is active
-                    if self.hex_mode_var.get():
-                        # Display data in hexadecimal format
-                        message_to_log = f"Received from {addr} HEX: {data.hex().upper()}\n"
-                    else:
-                        # Display data as a regular string
-                        message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}\n"
+        """Reads data from the UDP socket in a separate thread."""
+        while self.is_connected and self.sock:
+            try:
+                data, addr = self.sock.recvfrom(1024)
 
-                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
+                if self.hex_mode_var.get():
+                    # Display data in hexadecimal format
+                    message_to_log = f"Received from {addr} HEX: {data.hex().upper()}\n"
+                else:
+                    # Display data as a regular string
+                    message_to_log = f"Received from {addr}: {data.decode('utf-8', errors='ignore')}\n"
+
+                # Display the message in the UI and scroll to the latest entry
+                self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, message_to_log, 'received'))
+                self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
+                winsound.Beep(1115, 95)  # Audible notification for incoming message
+
+            except socket.error as e:
+                if self.is_connected:
+                    # Display socket error in the UI
+                    self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket Error: {e}\n", 'error'))
                     self.tab_frame.after(0, lambda: self.status_text.see(tk.END))
-                    winsound.Beep(1115, 95)
-                except socket.error as e:
-                    if self.is_connected:
-                        self.tab_frame.after(0, lambda: self.status_text.insert(tk.END, f"UDP socket Error : {e}\n", 'error'))
-                    self.disconnect()
-                    break
+                self.disconnect()
+                break
 
     def send_data(self, data_to_send_bytes):
         """Sends byte data through the UDP socket."""

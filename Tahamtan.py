@@ -18,7 +18,7 @@ import subprocess
 import platform
 from ping3 import ping
 from queue import Queue
-from gui_util import safe_tk_call
+# from gui_util import safe_tk_call
 
 # You can customize these fonts
 STATUS_FONT = ("Helvetica", 10, "bold")
@@ -353,51 +353,56 @@ class TcpClientManager:
 
     def create_tcp_widgets(self):
         """Creates all GUI widgets for the TCP tab."""
-        input_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
-        input_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
-        
         default_font = font.nametofont("TkDefaultFont")
         default_font.config(size=10)
 
-        ttk.Label(input_frame, text="IP Address :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
-        self.ip_entry = ttk.Entry(input_frame, width=15, font=default_font)
+        connection_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        connection_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+
+        ttk.Label(connection_frame, text="IP Address :", font=default_font).grid(row=0, column=0, padx=5, pady=5)
+        self.ip_entry = ttk.Entry(connection_frame, width=15, font=default_font)
         self.ip_entry.grid(row=0, column=1, padx=0, pady=5)
         self.ip_entry.insert(0, "192.168.1.200")
-        
-        ttk.Label(input_frame, text="Port :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
-        self.port_entry = ttk.Entry(input_frame, width=8, font=default_font)
+
+        ttk.Label(connection_frame, text="Port :", font=default_font).grid(row=0, column=2, padx=5, pady=5)
+        self.port_entry = ttk.Entry(connection_frame, width=8, font=default_font)
         self.port_entry.grid(row=0, column=3, padx=0, pady=5, sticky=tk.W)
         self.port_entry.insert(0, "8585")
-        
-        input_frame.columnconfigure(4, weight=1)
-        self.connect_button = ttk.Button(input_frame, text="Connect", command=self.toggle_connection_threaded)
+
+        connection_frame.columnconfigure(4, weight=1)
+        self.connect_button = ttk.Button(connection_frame, text="Connect", command=self.toggle_connection_threaded)
         self.connect_button.grid(row=0, column=4, padx=5, pady=5, sticky='ew')
-        
-        self.ping_button = ttk.Button(input_frame, text="Ping", command=self.send_ping)
-        self.ping_button.grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
 
-        self.ping_status_label = ttk.Label(input_frame, text="RTT : IDLE", font=default_font)
-        self.ping_status_label.grid(row=1, column=1, padx=5, pady=2, sticky=tk.W)
-        
-        self.ping_result_label = ttk.Label(input_frame, text="RTT : N/A", font=default_font)
-        self.ping_result_label.grid(row=1, column=2, padx=5, pady=2, sticky=tk.W)
+        status_frame = tk.Frame(self.tab_frame, bg="#F0F0F0")
+        status_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 0))
 
-        lights_frame = tk.Frame(input_frame, bg="#F0F0F0")
-        lights_frame.grid(row=1, column=4, padx=5, pady=0, sticky=tk.E)
-        
+        self.ping_button = ttk.Button(status_frame, text="Ping", command=self.send_ping)
+        self.ping_button.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+
+        self.ping_status_label = ttk.Label(status_frame, text="RTT : IDLE", font=default_font)
+        self.ping_status_label.grid(row=0, column=1, padx=5, pady=2, sticky=tk.W)
+
+        self.ping_result_label = ttk.Label(status_frame, text="RTT : N/A", font=default_font)
+        self.ping_result_label.grid(row=0, column=2, padx=5, pady=2, sticky=tk.W)
+
+        status_frame.columnconfigure(4, weight=1)
+        lights_frame = tk.Frame(status_frame, bg="#F0F0F0")
+        lights_frame.grid(row=0, column=4, padx=5, pady=0, sticky=tk.E)
+
         self.disconnected_canvas = tk.Canvas(lights_frame, width=25, height=25)
         self.disconnected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
         create_circle(self.disconnected_canvas, 12, 12, 10, "red")
-        
+
         self.connecting_canvas = tk.Canvas(lights_frame, width=25, height=25)
         self.connecting_canvas.pack(side=tk.LEFT, padx=1, pady=0)
         create_circle(self.connecting_canvas, 12, 12, 10, "gray")
-        
+
         self.connected_canvas = tk.Canvas(lights_frame, width=25, height=25)
         self.connected_canvas.pack(side=tk.LEFT, padx=1, pady=0)
         create_circle(self.connected_canvas, 12, 12, 10, "gray")
-        
+
         self.update_ui(connected=False)
+
 
     def send_ping(self):
         """
